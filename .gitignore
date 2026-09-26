@@ -1,0 +1,35 @@
+# Swift Package Manager build and workspace data
+.build/
+.swiftpm/
+Packages/
+
+# Built application and distribution output
+dist/
+*.app/
+*.dSYM/
+*.xcarchive/
+
+# FFmpeg build output; sources and license files under Vendor/FFmpeg stay tracked
+/ffbuild/
+Vendor/FFmpeg/lib/libDlnaTubeMedia.dylib
+
+# Xcode user data and local build products
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+
+# Editor temporary files
+*.swp
+*.swo
+*~

@@ -1,0 +1,389 @@
+import Foundation
+import SwiftUI
+
+@MainActor
+final class PlayerModel: ObservableObject {
+    @Published var devices: [Renderer] = []
+    @Published var selectedDeviceID = ""
+    @Published var capabilities: RendererCapabilities?
+    @Published var capabilityMessage: String?
+    @Published var loadingCapabilities = false
+    @Published var videoURL = ""
+    @Published private(set) var videoHistory: [VideoHistoryEntry]
+    @Published private(set) var desiredQuality: VideoQuality = .p720
+    @Published var proxyURL = UserDefaults.standard.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
+    @Published var title = ""
+    @Published var status = "Готово"
+    @Published var errorMessage: String?
+    @Published var discovering = false
+    @Published var busy = false
+    @Published var preparing = false
+    @Published var playing = false
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
+    @Published var canSeek = false
+    @Published var hasMedia = false
+
+    private var server: MediaServer?
+    private var activeDevice: Renderer?
+    private var pendingDevice: Renderer?
+    private var currentSource: MediaSource?
+    private var currentProxy: String?
+    private var playbackBase: Double = 0
+    private var pollTask: Task<Void, Never>?
+    private var castTask: Task<Void, Never>?
+    private var capabilityTask: Task<Void, Never>?
+    private var capabilityDeviceID = ""
+    private var capabilityCache: [String: RendererCapabilities] = [:]
+    private var lastPollingError: String?
+    private var qualityByDevice: [String: VideoQuality] = [:]
+
+    init() {
+        let defaults = UserDefaults.standard
+        let oldPreferences = defaults.persistentDomain(forName: "app.dlnatube.DlnaTube") ?? [:]
+        for key in [ProxySettings.preferenceKey, "videoHistory", VideoQuality.preferencesByDeviceKey]
+            where defaults.object(forKey: key) == nil {
+            if let value = oldPreferences[key] { defaults.set(value, forKey: key) }
+        }
+        let stored = defaults.data(forKey: "videoHistory")
+        let entries = stored.flatMap { try? JSONDecoder().decode([VideoHistoryEntry].self, from: $0) } ?? []
+        var seen = Set<String>()
+        videoHistory = entries.filter { !$0.url.isEmpty && seen.insert($0.url).inserted }.prefix(100).map { $0 }
+        proxyURL = defaults.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
+        if let data = defaults.data(forKey: VideoQuality.preferencesByDeviceKey),
+           let stored = try? JSONDecoder().decode([String: Int].self, from: data) {
+            qualityByDevice = stored.reduce(into: [:]) { result, item in
+                if let quality = VideoQuality(rawValue: item.value) { result[item.key] = quality }
+            }
+        }
+    }
+
+    func discover(startup: Bool = false) {
+        guard !discovering else { return }
+        discovering = true
+        status = "Поиск устройств…"
+        errorMessage = nil
+        Task {
+            var result: [Renderer] = []
+            for attempt in 0..<(startup ? 3 : 1) {
+                if attempt > 0 {
+                    status = "Повторный поиск устройств…"
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                result = await SSDP.discover()
+                if !result.isEmpty { break }
+            }
+            devices = result
+            discovering = false
+            if !result.contains(where: { $0.id == selectedDeviceID }) {
+                selectedDeviceID = result.count == 1 ? result[0].id : ""
+            }
+            loadCapabilities()
+            status = result.isEmpty
+                ? "DLNA-устройства не найдены. Проверьте сеть и разрешение «Локальная сеть» для DLNAtube в настройках macOS."
+                : "Найдено устройств: \(result.count)"
+        }
+    }
+
+    func loadCapabilities() {
+        guard let device = devices.first(where: { $0.id == selectedDeviceID }) else {
+            capabilityTask?.cancel()
+            capabilityDeviceID = ""
+            capabilities = nil
+            capabilityMessage = nil
+            loadingCapabilities = false
+            desiredQuality = .p720
+            return
+        }
+        if loadingCapabilities && capabilityDeviceID == device.id { return }
+        capabilityTask?.cancel()
+        capabilityDeviceID = device.id
+        desiredQuality = qualityByDevice[device.id] ?? .p720
+        capabilities = capabilityCache[device.id]
+        capabilityMessage = nil
+        guard capabilities == nil else {
+            applyRecommendedQuality()
+            loadingCapabilities = false
+            return
+        }
+        loadingCapabilities = true
+        capabilityTask = Task {
+            do {
+                let value = try await DLNA.capabilities(device: device)
+                guard !Task.isCancelled, selectedDeviceID == device.id else { return }
+                capabilityCache[device.id] = value
+                capabilities = value
+                applyRecommendedQuality()
+            } catch {
+                guard !Task.isCancelled, selectedDeviceID == device.id else { return }
+                capabilityMessage = error.localizedDescription
+            }
+            loadingCapabilities = false
+            capabilityTask = nil
+        }
+    }
+
+    func selectVideoQuality(_ quality: VideoQuality) {
+        desiredQuality = quality
+        guard !selectedDeviceID.isEmpty else { return }
+        qualityByDevice[selectedDeviceID] = quality
+        let stored = qualityByDevice.mapValues(\.rawValue)
+        if let data = try? JSONEncoder().encode(stored) {
+            UserDefaults.standard.set(data, forKey: VideoQuality.preferencesByDeviceKey)
+        }
+    }
+
+    private func applyRecommendedQuality() {
+        if let saved = qualityByDevice[selectedDeviceID] {
+            desiredQuality = saved
+            return
+        }
+        desiredQuality = VideoQuality.recommended(maxHeight: capabilities?.maxVideoHeight)
+    }
+
+    @discardableResult
+    func saveProxy() -> Bool {
+        do {
+            let normalized = try ProxySettings.normalized(proxyURL)
+            UserDefaults.standard.set(normalized ?? "", forKey: ProxySettings.preferenceKey)
+            proxyURL = normalized ?? ""
+            errorMessage = nil
+            status = "Настройки прокси сохранены"
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
+    func cast() {
+        guard !busy, let device = devices.first(where: { $0.id == selectedDeviceID }) else { return }
+        let requestedURL = videoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requestedURL.isEmpty else { return }
+        busy = true
+        preparing = true
+        errorMessage = nil
+        status = "Получение видеопотока…"
+        pendingDevice = device
+        castTask = Task {
+            do {
+                let proxy = try ProxySettings.normalized(proxyURL)
+                let source = try await MediaExtractor.extract(
+                    videoURL: requestedURL,
+                    proxy: proxy,
+                    maxVideoHeight: desiredQuality.rawValue
+                ) { [weak self] message in
+                    Task { @MainActor [weak self] in
+                        if self?.preparing == true { self?.status = message }
+                    }
+                }
+                if source.isTransportStream { try MediaBridge.requireAvailable() }
+                try Task.checkCancellation()
+                if server == nil { server = try MediaServer() }
+                guard let server else { return }
+                pollTask?.cancel()
+                if let previous = activeDevice {
+                    _ = try? await DLNA.command("Stop", device: previous)
+                }
+                server.set(source, proxy: proxy)
+                let localURL = try server.url(for: device)
+                status = "Подключение к телевизору…"
+                try Task.checkCancellation()
+                try await DLNA.setMedia(localURL, title: source.title, device: device, isTransportStream: source.isTransportStream)
+                try Task.checkCancellation()
+                _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
+                StreamingLog.dlna.info("Playback started: device=\(device.name, privacy: .public), transport=\(source.isTransportStream ? "mpeg-ts" : "mp4", privacy: .public)")
+                recordSuccessfulPlayback(url: requestedURL, title: source.title)
+                activeDevice = device
+                currentSource = source
+                currentProxy = proxy
+                playbackBase = 0
+                title = source.title
+                playing = true
+                position = 0
+                duration = source.duration ?? 0
+                canSeek = duration > 0
+                hasMedia = true
+                status = playbackStatus(playing: true, deviceName: device.name, source: source)
+                startPolling()
+            } catch is CancellationError {
+                status = "Подготовка отменена"
+                errorMessage = nil
+            } catch { show(error) }
+            busy = false
+            preparing = false
+            castTask = nil
+            pendingDevice = nil
+        }
+    }
+
+    func stopBeforeApplicationExit() async {
+        pollTask?.cancel()
+        capabilityTask?.cancel()
+
+        let castInProgress = castTask
+        let castDevice = pendingDevice
+        castInProgress?.cancel()
+        if let castInProgress { await castInProgress.value }
+
+        var targets = [Renderer]()
+        if let activeDevice { targets.append(activeDevice) }
+        if let castDevice, !targets.contains(where: { $0.id == castDevice.id }) {
+            targets.append(castDevice)
+        }
+        guard !targets.isEmpty else { return }
+
+        await withTaskGroup(of: Void.self) { group in
+            for device in targets {
+                group.addTask {
+                    _ = try? await DLNA.command("Stop", device: device, timeout: 2)
+                }
+            }
+            await group.waitForAll()
+        }
+    }
+
+    func cancelPreparation() {
+        guard preparing else { return }
+        castTask?.cancel()
+        status = "Отмена подготовки…"
+    }
+
+    func togglePlayback() {
+        guard let device = activeDevice, !busy else { return }
+        let wasPlaying = playing
+        busy = true
+        Task {
+            do {
+                if wasPlaying {
+                    _ = try await DLNA.command("Pause", device: device)
+                } else {
+                    _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
+                }
+                playing = !wasPlaying
+                status = playbackStatus(playing: playing)
+                errorMessage = nil
+                startPolling()
+            } catch { show(error) }
+            busy = false
+        }
+    }
+
+    func stop() {
+        guard let device = activeDevice, !busy else { return }
+        busy = true
+        pollTask?.cancel()
+        Task {
+            do {
+                _ = try await DLNA.command("Stop", device: device)
+                playing = false
+                playbackBase = 0
+                position = 0
+                status = "Остановлено"
+                errorMessage = nil
+            } catch { show(error) }
+            busy = false
+        }
+    }
+
+    func seek(to seconds: Double) {
+        guard let device = activeDevice, let source = currentSource,
+              canSeek, !busy, seconds.isFinite else { return }
+        let target = min(max(0, seconds), max(0, duration - 1))
+        busy = true
+        pollTask?.cancel()
+        status = "Перемотка на \(DLNA.clock(target))…"
+        Task {
+            var succeeded = false
+            do {
+                if source.isTransportStream {
+                    guard let server else { throw TubeError.message("Локальный медиасервер недоступен.") }
+                    let wasPlaying = playing
+                    _ = try? await DLNA.command("Stop", device: device)
+                    server.set(source, proxy: currentProxy, startSeconds: target)
+                    let url = try server.url(for: device)
+                    try await DLNA.setMedia(url, title: source.title, device: device, isTransportStream: true)
+                    _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
+                    playing = true
+                    if !wasPlaying, (try? await DLNA.command("Pause", device: device)) != nil {
+                        playing = false
+                    }
+                    playbackBase = server.playbackStart()
+                } else {
+                    _ = try await DLNA.command("Seek", device: device, arguments: [
+                        ("Unit", "REL_TIME"), ("Target", DLNA.clock(target))
+                    ])
+                }
+                position = target
+                errorMessage = nil
+                status = playbackStatus(playing: playing)
+                succeeded = true
+            } catch {
+                playing = false
+                playbackBase = 0
+                show(error)
+            }
+            busy = false
+            if succeeded { startPolling() }
+        }
+    }
+
+    private func startPolling() {
+        pollTask?.cancel()
+        pollTask = Task {
+            while !Task.isCancelled {
+                if let device = activeDevice {
+                    do {
+                        let state = try await DLNA.state(device: device)
+                        if lastPollingError != nil {
+                            StreamingLog.dlna.info("DLNA polling recovered: device=\(device.name, privacy: .public)")
+                            lastPollingError = nil
+                        }
+                        if playing && !state.playing {
+                            StreamingLog.dlna.error("TV left PLAYING state: device=\(device.name, privacy: .public), position=\(state.position, format: .fixed(precision: 3)), duration=\(state.duration, format: .fixed(precision: 3))")
+                        }
+                        playing = state.playing
+                        if currentSource?.isTransportStream == true, let server {
+                            playbackBase = server.playbackStart()
+                        }
+                        let reportedPosition = max(0, playbackBase + state.position)
+                        position = duration > 0 ? min(duration, reportedPosition) : reportedPosition
+                        if state.duration > 0 { duration = state.duration }
+                    } catch {
+                        let message = error.localizedDescription
+                        if lastPollingError != message {
+                            StreamingLog.dlna.error("DLNA polling failed: device=\(device.name, privacy: .public), error=\(message, privacy: .public)")
+                            lastPollingError = message
+                        }
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func recordSuccessfulPlayback(url: String, title: String) {
+        let entry = VideoHistoryEntry(url: url, title: title)
+        videoHistory.removeAll { $0.url == url }
+        videoHistory.insert(entry, at: 0)
+        videoHistory = Array(videoHistory.prefix(100))
+        if let data = try? JSONEncoder().encode(videoHistory) {
+            UserDefaults.standard.set(data, forKey: "videoHistory")
+        }
+    }
+
+    private func playbackStatus(playing: Bool, deviceName: String? = nil,
+                                source: MediaSource? = nil) -> String {
+        var text = playing ? "Воспроизведение" : "Пауза"
+        if let deviceName { text += " на \(deviceName)" }
+        if let height = (source ?? currentSource)?.videoHeight {
+            text += " • \(VideoQuality.title(for: height))"
+        }
+        return text
+    }
+
+    private func show(_ error: Error) {
+        errorMessage = error.localizedDescription
+        status = error.localizedDescription
+    }
+}

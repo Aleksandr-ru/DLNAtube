@@ -81,19 +81,53 @@ enum MediaExtractor {
         // YouTube changes its private player API frequently. Keep the fast local
         // extractor first, then use YouTubeKit's maintained service when the
         // bundled extractor can no longer understand a response.
-        let video = YouTube(url: url, methods: [.local, .remote])
+        var video = YouTube(url: url, methods: [.local])
         progress(L10n.text("Поиск доступных потоков YouTube…", "Searching for available YouTube streams…"))
-        let streams = try await withThrowingTaskGroup(of: [YouTubeKit.Stream].self) { group in
-            group.addTask { try await video.streams }
-            group.addTask {
-                try await Task.sleep(nanoseconds: 90_000_000_000)
-                throw TubeError.message(L10n.text(
-                    "YouTube не ответил за 90 секунд. Проверьте прокси и попробуйте ещё раз.",
-                    "YouTube did not respond within 90 seconds. Check the proxy and try again."
-                ))
+        func loadStreams(from video: YouTube) async throws -> [YouTubeKit.Stream] {
+            try await withThrowingTaskGroup(of: [YouTubeKit.Stream].self) { group in
+                group.addTask { try await video.streams }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 90_000_000_000)
+                    throw TubeError.message(L10n.text(
+                        "YouTube не ответил за 90 секунд. Проверьте прокси и попробуйте ещё раз.",
+                        "YouTube did not respond within 90 seconds. Check the proxy and try again."
+                    ))
+                }
+                defer { group.cancelAll() }
+                return try await group.next()!
             }
-            defer { group.cancelAll() }
-            return try await group.next()!
+        }
+        var streams: [YouTubeKit.Stream] = []
+        var lastLocalError: Error?
+        for attempt in 0..<3 {
+            video = YouTube(url: url, methods: [.local])
+            do {
+                streams = try await loadStreams(from: video)
+                if hasCompatibleStreams(streams) { break }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastLocalError = error
+            }
+            if attempt < 2 {
+                progress(L10n.text(
+                    "Повторный локальный поиск потоков YouTube…",
+                    "Retrying the local YouTube stream search…"
+                ))
+                try await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+        if !hasCompatibleStreams(streams) {
+            progress(L10n.text(
+                "Резервный поиск потоков YouTube…",
+                "Using the fallback YouTube stream search…"
+            ))
+            video = YouTube(url: url, methods: [.remote])
+            do {
+                streams = try await loadStreams(from: video)
+            } catch {
+                throw lastLocalError ?? error
+            }
         }
         try Task.checkCancellation()
         progress(L10n.text("Получение названия и выбор формата…", "Retrieving the title and selecting a format…"))
@@ -141,6 +175,17 @@ enum MediaExtractor {
         let combined = atTarget.filter(\.includesVideoAndAudioTrack)
         return (combined.isEmpty ? atTarget : combined)
             .max { ($0.bitrate ?? 0) < ($1.bitrate ?? 0) }
+    }
+
+    private static func hasCompatibleStreams(_ streams: [YouTubeKit.Stream]) -> Bool {
+        let videos = streams.filter {
+            $0.fileExtension == .mp4 && $0.includesVideoTrack && $0.videoCodec == .avc1
+        }
+        guard !videos.isEmpty else { return false }
+        if videos.contains(where: \.includesVideoAndAudioTrack) { return true }
+        return streams.contains {
+            $0.fileExtension == .m4a && $0.includesAudioTrack && !$0.includesVideoTrack && $0.audioCodec == .mp4a
+        }
     }
 
     static func preferredHeight(_ heights: [Int], maxHeight: Int) -> Int? {

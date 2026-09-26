@@ -12,7 +12,7 @@ Requires macOS 13 or later and Xcode Command Line Tools with Swift 5.9+, `clang`
 
 ```sh
 sh scripts/build-app.sh
-open dist/DlnaTube.app
+open dist/DLNAtube.app
 ```
 
 If the project does not contain a prebuilt FFmpeg library for the current architecture, the script builds it from `Vendor/FFmpeg/ffmpeg-8.1.3.tar.xz`. The first such build takes longer. Building the application automatically increments the third version component and writes the new values to `Resources/Info.plist`.

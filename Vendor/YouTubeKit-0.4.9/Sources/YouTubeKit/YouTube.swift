@@ -363,6 +363,9 @@ public class YouTube {
             let signatureTimestamp = try await signatureTimestamp
             let ytcfg = try await ytcfg
             
+            // ANDROID_VR currently returns CDN URLs that allow reading from byte
+            // zero but respond with HTTP 403 for ranges in the middle of a file,
+            // which makes seeking impossible for remuxed DLNA streams.
             let innertubeClients: [InnerTube.ClientType] = [.visionOS, .web]
             
             let results: [Result<InnerTube.VideoInfo, Error>] = await innertubeClients.concurrentMap { [videoID, useOAuth, allowOAuthCache] client in

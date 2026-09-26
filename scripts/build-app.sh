@@ -13,11 +13,23 @@ if ! app_version=$(printf '%s\n' "$last_version" | awk -F. 'NF == 3 && $1 ~ /^[0
     echo "Invalid app version in Resources/Info.plist: $last_version" >&2
     exit 1
 fi
-app_dir="$PWD/dist/DlnaTube.app"
+app_dir="$PWD/dist/DLNAtube.app"
+existing_app_dir=$(find "$PWD/dist" -mindepth 1 -maxdepth 1 -type d -iname 'dlnatube.app' -print -quit 2>/dev/null || true)
+if [ -n "$existing_app_dir" ] && [ "$(basename "$existing_app_dir")" != "DLNAtube.app" ]; then
+    temporary_app_dir="$PWD/dist/.DLNAtube-name-fix.app"
+    mv "$existing_app_dir" "$temporary_app_dir"
+    mv "$temporary_app_dir" "$app_dir"
+fi
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
 mkdir -p "$app_dir/Contents/Frameworks"
-cp "$binary_dir/DlnaTube" "$app_dir/Contents/MacOS/DlnaTube"
+existing_executable=$(find "$app_dir/Contents/MacOS" -mindepth 1 -maxdepth 1 -type f -iname 'dlnatube' -print -quit 2>/dev/null || true)
+if [ -n "$existing_executable" ] && [ "$(basename "$existing_executable")" != "DLNAtube" ]; then
+    temporary_executable="$app_dir/Contents/MacOS/.DLNAtube-name-fix"
+    mv "$existing_executable" "$temporary_executable"
+    mv "$temporary_executable" "$app_dir/Contents/MacOS/DLNAtube"
+fi
+cp "$binary_dir/DLNAtube" "$app_dir/Contents/MacOS/DLNAtube"
 cp Vendor/FFmpeg/lib/libDlnaTubeMedia.dylib "$app_dir/Contents/Frameworks/"
 cp Resources/Info.plist "$app_dir/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $app_version" "$app_dir/Contents/Info.plist"

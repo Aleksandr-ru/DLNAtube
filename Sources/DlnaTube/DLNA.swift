@@ -179,6 +179,11 @@ struct TransportState {
     let duration: Double
 
     var playing: Bool { name == "PLAYING" }
+    var transitioning: Bool { name == "TRANSITIONING" }
+
+    func resolvedPlaying(previous: Bool) -> Bool {
+        transitioning ? previous : playing
+    }
 }
 
 struct RendererCapabilities: Equatable {
@@ -367,6 +372,43 @@ enum DLNA {
             position: seconds(position["RelTime"] ?? ""),
             duration: seconds(position["TrackDuration"] ?? "")
         )
+    }
+
+    @discardableResult
+    static func resumePlayback(device: Renderer, timeout: TimeInterval = 10) async throws -> TransportState {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var nextPlayAttempt: TimeInterval = 0
+        var lastError: Error?
+
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            do {
+                let current = try await state(device: device)
+                if current.playing { return current }
+                let now = ProcessInfo.processInfo.systemUptime
+                if !current.transitioning && now >= nextPlayAttempt {
+                    do {
+                        _ = try await command("Play", device: device, arguments: [("Speed", "1")])
+                        nextPlayAttempt = now + 2
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        lastError = error
+                        nextPlayAttempt = now + 1
+                    }
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+
+        if let lastError { throw lastError }
+        throw TubeError.message(L10n.text(
+            "Телевизор не перешёл в режим воспроизведения.",
+            "The TV did not enter the playing state."
+        ))
     }
 
     static func seconds(_ clock: String) -> Double {

@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>DLNAtube</string>
 	<key>CFBundleExecutable</key>
-	<string>DlnaTube</string>
+	<string>DLNAtube</string>
 	<key>CFBundleIconFile</key>
 	<string>DlnaTube.icns</string>
 	<key>CFBundleIdentifier</key>
@@ -19,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.14</string>
+	<string>0.1.20</string>
 	<key>CFBundleVersion</key>
-	<string>0.1.14</string>
+	<string>0.1.20</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSAppTransportSecurity</key>

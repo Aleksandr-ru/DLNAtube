@@ -303,7 +303,7 @@ final class PlayerModel: ObservableObject {
                 if wasPlaying {
                     _ = try await DLNA.command("Pause", device: device)
                 } else {
-                    _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
+                    _ = try await DLNA.resumePlayback(device: device)
                 }
                 playing = !wasPlaying
                 position = playbackTimeline.estimatedPosition(
@@ -355,7 +355,7 @@ final class PlayerModel: ObservableObject {
                     server.set(source, proxy: currentProxy, startSeconds: target)
                     let url = try server.url(for: device)
                     try await DLNA.setMedia(url, title: source.title, device: device, isTransportStream: true)
-                    _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
+                    _ = try await DLNA.resumePlayback(device: device)
                     playing = true
                     if !wasPlaying, (try? await DLNA.command("Pause", device: device)) != nil {
                         playing = false
@@ -394,7 +394,8 @@ final class PlayerModel: ObservableObject {
                             lastPollingError = nil
                         }
                         let wasPlaying = playing
-                        if wasPlaying && !state.playing {
+                        let resolvedPlaying = state.resolvedPlaying(previous: wasPlaying)
+                        if wasPlaying && !resolvedPlaying {
                             StreamingLog.dlna.error("TV left PLAYING state: device=\(device.name, privacy: .public), state=\(state.name, privacy: .public), position=\(state.position, format: .fixed(precision: 3)), duration=\(state.duration, format: .fixed(precision: 3))")
                         }
                         let transportStream = currentSource?.isTransportStream == true
@@ -411,7 +412,7 @@ final class PlayerModel: ObservableObject {
                         let uptime = ProcessInfo.processInfo.systemUptime
                         position = playbackTimeline.reconcile(
                             reportedPosition: absoluteReport,
-                            remotePlaying: state.playing,
+                            remotePlaying: resolvedPlaying,
                             uptime: uptime,
                             duration: duration,
                             keepClockMoving: transportStream
@@ -426,7 +427,7 @@ final class PlayerModel: ObservableObject {
                             applyStoppedState(uptime: uptime)
                             return
                         }
-                        playing = state.playing
+                        playing = resolvedPlaying
                         if wasPlaying != playing {
                             status = state.name == "STOPPED"
                                 ? L10n.text("Остановлено", "Stopped")

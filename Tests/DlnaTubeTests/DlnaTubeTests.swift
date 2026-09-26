@@ -1,6 +1,6 @@
 import XCTest
 import YouTubeKit
-@testable import DlnaTube
+@testable import DLNAtube
 
 final class DlnaTubeTests: XCTestCase {
     private var appProxy: String {
@@ -90,6 +90,17 @@ final class DlnaTubeTests: XCTestCase {
         XCTAssertEqual(timeline.estimatedPosition(at: 40, duration: 300), 135, accuracy: 0.001)
     }
 
+    func testTransitioningTransportPreservesPlaybackState() {
+        let transitioning = TransportState(name: "TRANSITIONING", position: 10, duration: 100)
+        XCTAssertTrue(transitioning.transitioning)
+        XCTAssertTrue(transitioning.resolvedPlaying(previous: true))
+        XCTAssertFalse(transitioning.resolvedPlaying(previous: false))
+
+        let paused = TransportState(name: "PAUSED_PLAYBACK", position: 10, duration: 100)
+        XCTAssertFalse(paused.transitioning)
+        XCTAssertFalse(paused.resolvedPlaying(previous: true))
+    }
+
     func testLocalMediaRange() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("DlnaTube-test-\(UUID().uuidString).mp4")
         try Data("abcdefghij".utf8).write(to: file)
@@ -108,7 +119,10 @@ final class DlnaTubeTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["DLNATUBE_TEST_YOUTUBE"] == "1" else { return }
         YouTube.networkSession = URLSession(configuration: ProxySettings.configuration(appProxy))
         let url = URL(string: ProcessInfo.processInfo.environment["DLNATUBE_TEST_URL"] ?? "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
-        let video = YouTube(url: url, methods: [.local, .remote])
+        let methods: [YouTube.ExtractionMethod] = ProcessInfo.processInfo.environment["DLNATUBE_TEST_LOCAL_ONLY"] == "1"
+            ? [.local]
+            : [.local, .remote]
+        let video = YouTube(url: url, methods: methods)
         let streams = try await video.streams
         if ProcessInfo.processInfo.environment["DLNATUBE_INSPECT_FORMATS"] == "1" {
             for stream in streams.sorted(by: { ($0.videoResolution ?? 0) < ($1.videoResolution ?? 0) }) {
@@ -120,10 +134,32 @@ final class DlnaTubeTests: XCTestCase {
 
     func testMediaPreparationWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["DLNATUBE_TEST_MEDIA"] == "1" else { return }
+        let url = ProcessInfo.processInfo.environment["DLNATUBE_TEST_URL"] ?? "https://www.youtube.com/watch?v=0mh5d2a8wp0"
         let source = try await MediaExtractor.extract(
-            videoURL: "https://www.youtube.com/watch?v=0mh5d2a8wp0",
+            videoURL: url,
             proxy: appProxy
         )
+        if ProcessInfo.processInfo.environment["DLNATUBE_INSPECT_FORMATS"] == "1" {
+            print("MEDIA_SOURCE title=\(source.title) duration=\(source.duration ?? -1) height=\(source.videoHeight ?? 0) transport=\(source.isTransportStream)")
+        }
+        if ProcessInfo.processInfo.environment["DLNATUBE_TEST_RANGES"] == "1" {
+            for (index, streamURL) in [source.url, source.audioURL].compactMap({ $0 }).enumerated() {
+                let client = URLComponents(url: streamURL, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first(where: { $0.name == "c" })?.value ?? "unknown"
+                let size = URLComponents(url: streamURL, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first(where: { $0.name == "clen" })?.value.flatMap(Int64.init) ?? 1
+                for offset in [Int64(0), max(0, size / 2)] {
+                    var request = URLRequest(url: streamURL)
+                    request.setValue("bytes=\(offset)-\(offset + 524_287)", forHTTPHeaderField: "Range")
+                    request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                    let (_, response) = try await URLSession(configuration: ProxySettings.configuration(appProxy)).data(for: request)
+                    let http = response as? HTTPURLResponse
+                    print("RANGE stream=\(index) client=\(client) offset=\(offset) status=\(http?.statusCode ?? 0) contentRange=\(http?.value(forHTTPHeaderField: "Content-Range") ?? "missing")")
+                    XCTAssertEqual(http?.statusCode, 206)
+                    XCTAssertNotNil(http?.value(forHTTPHeaderField: "Content-Range"))
+                }
+            }
+        }
         XCTAssertFalse(source.title.isEmpty)
         XCTAssertNotNil(source.url)
         XCTAssertNil(source.fileURL)
@@ -150,14 +186,8 @@ final class DlnaTubeTests: XCTestCase {
 
     func testLiveTransportWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["DLNATUBE_TEST_TRANSPORT"] == "1" else { return }
-        YouTube.networkSession = URLSession(configuration: ProxySettings.configuration(appProxy))
-        let video = YouTube(url: URL(string: "https://www.youtube.com/watch?v=0mh5d2a8wp0")!, methods: [.local])
-        let streams = try await video.streams
-        let picture = try XCTUnwrap(streams.filter { $0.fileExtension == .mp4 && $0.videoCodec == .avc1 && $0.includesVideoTrack && !$0.includesAudioTrack && ($0.videoResolution ?? 0) <= 720 }
-            .max { ($0.videoResolution ?? 0) < ($1.videoResolution ?? 0) })
-        let sound = try XCTUnwrap(streams.filter { $0.fileExtension == .m4a && $0.audioCodec == .mp4a && $0.includesAudioTrack && !$0.includesVideoTrack }
-            .max { ($0.bitrate ?? 0) < ($1.bitrate ?? 0) })
-        let source = MediaSource(url: picture.url, fileURL: nil, title: "DLNA streaming test", headers: ["User-Agent": "Mozilla/5.0"], audioURL: sound.url)
+        let url = ProcessInfo.processInfo.environment["DLNATUBE_TEST_URL"] ?? "https://www.youtube.com/watch?v=0mh5d2a8wp0"
+        let source = try await MediaExtractor.extract(videoURL: url, proxy: appProxy, maxVideoHeight: 720)
         XCTAssertTrue(source.isTransportStream)
         try MediaBridge.requireAvailable()
         let server = try MediaServer()
@@ -221,9 +251,7 @@ final class DlnaTubeTests: XCTestCase {
             let url = try server.url(for: device)
             _ = try? await DLNA.command("Stop", device: device)
             try await DLNA.setMedia(url, title: source.title, device: device, isTransportStream: true)
-            _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
-            try await Task.sleep(nanoseconds: 8_000_000_000)
-            let state = try await DLNA.state(device: device)
+            let state = try await DLNA.resumePlayback(device: device)
             print("TV_PLAYING=\(state.playing) POSITION=\(state.position) DURATION=\(state.duration)")
             XCTAssertTrue(state.playing)
             if ProcessInfo.processInfo.environment["DLNATUBE_TEST_SEEK"] == "1" {
@@ -231,9 +259,7 @@ final class DlnaTubeTests: XCTestCase {
                 server.set(source, proxy: appProxy, startSeconds: 20)
                 let resumedURL = try server.url(for: device)
                 try await DLNA.setMedia(resumedURL, title: source.title, device: device, isTransportStream: true)
-                _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
-                try await Task.sleep(nanoseconds: 5_000_000_000)
-                let afterSeek = try await DLNA.state(device: device)
+                let afterSeek = try await DLNA.resumePlayback(device: device)
                 print("TV_RESTART_AT_20 playing=\(afterSeek.playing) position=\(afterSeek.position)")
                 XCTAssertTrue(afterSeek.playing)
             }

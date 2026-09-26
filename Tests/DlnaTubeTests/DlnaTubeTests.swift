@@ -29,9 +29,13 @@ final class DlnaTubeTests: XCTestCase {
         let capabilities = RendererCapabilities(protocolInfo: info)
         XCTAssertEqual(capabilities.videoFormats, ["MP4", "MPEG-TS"])
         XCTAssertEqual(capabilities.audioFormats, ["AAC", "MP3"])
-        XCTAssertEqual(capabilities.resolution, "Указан профиль 720p")
+        XCTAssertEqual(capabilities.resolutionText(language: .russian), "Указан профиль 720p")
+        XCTAssertEqual(capabilities.resolutionText(language: .english), "Reported 720p profile")
         XCTAssertEqual(capabilities.maxVideoHeight, 720)
-        XCTAssertEqual(RendererCapabilities(protocolInfo: "http-get:*:video/mp4:*").resolution, "Не указано устройством")
+        XCTAssertEqual(
+            RendererCapabilities(protocolInfo: "http-get:*:video/mp4:*").resolutionText(language: .russian),
+            "Не указано устройством"
+        )
         XCTAssertNil(RendererCapabilities(protocolInfo: "http-get:*:video/mp4:*").maxVideoHeight)
         XCTAssertEqual(VideoQuality.recommended(maxHeight: 1080), .p1080)
         XCTAssertEqual(VideoQuality.recommended(maxHeight: 4320), .p4320)
@@ -44,6 +48,16 @@ final class DlnaTubeTests: XCTestCase {
         XCTAssertEqual(MediaExtractor.preferredHeight([360, 720, 1080], maxHeight: 720), 720)
         XCTAssertEqual(MediaExtractor.preferredHeight([360, 1080], maxHeight: 720), 360)
         XCTAssertEqual(MediaExtractor.preferredHeight([1080, 2160], maxHeight: 720), 1080)
+    }
+
+    func testInterfaceLocalization() {
+        XCTAssertEqual(L10n.text("Русский", "English", language: .russian), "Русский")
+        XCTAssertEqual(L10n.text("Русский", "English", language: .english), "English")
+        XCTAssertEqual(AppLanguage.systemDefault(preferredLanguages: ["ru-RU", "en-US"]), .russian)
+        XCTAssertEqual(AppLanguage.systemDefault(preferredLanguages: ["ru_RU"]), .russian)
+        XCTAssertEqual(AppLanguage.systemDefault(preferredLanguages: ["en-US", "ru-RU"]), .english)
+        XCTAssertEqual(AppLanguage.systemDefault(preferredLanguages: ["de-DE"]), .english)
+        XCTAssertEqual(AppLanguage.systemDefault(preferredLanguages: []), .english)
     }
 
     func testLocalMediaRange() async throws {

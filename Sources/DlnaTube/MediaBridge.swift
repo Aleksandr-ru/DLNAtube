@@ -39,7 +39,10 @@ enum MediaBridge {
 
     static func requireAvailable() throws {
         guard function != nil else {
-            throw TubeError.message("Библиотека потокового видео не найдена. Соберите приложение через scripts/build-app.sh.")
+            throw TubeError.message(L10n.text(
+                "Библиотека потокового видео не найдена. Соберите приложение через scripts/build-app.sh.",
+                "The video streaming library was not found. Build the app with scripts/build-app.sh."
+            ))
         }
     }
 

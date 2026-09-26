@@ -27,7 +27,10 @@ enum ProxySettings {
               ["http", "https", "socks5"].contains(scheme),
               let host = parts.host, !host.isEmpty,
               let port = parts.port, (1...65535).contains(port) else {
-            throw TubeError.message("Укажите прокси в виде http://host:port или socks5://host:port.")
+            throw TubeError.message(L10n.text(
+                "Укажите прокси в виде http://host:port или socks5://host:port.",
+                "Enter the proxy as http://host:port or socks5://host:port."
+            ))
         }
         return text
     }
@@ -68,31 +71,40 @@ enum MediaExtractor {
               url.scheme == "https",
               let host = url.host?.lowercased(),
               ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"].contains(host) else {
-            throw TubeError.message("Введите HTTPS-ссылку на YouTube.")
+            throw TubeError.message(L10n.text(
+                "Введите HTTPS-ссылку на YouTube.",
+                "Enter an HTTPS YouTube URL."
+            ))
         }
         let session = URLSession(configuration: ProxySettings.configuration(proxy))
         YouTube.networkSession = session
         let video = YouTube(url: url, methods: [.local])
-        progress("Поиск доступных потоков YouTube…")
+        progress(L10n.text("Поиск доступных потоков YouTube…", "Searching for available YouTube streams…"))
         let streams = try await withThrowingTaskGroup(of: [YouTubeKit.Stream].self) { group in
             group.addTask { try await video.streams }
             group.addTask {
                 try await Task.sleep(nanoseconds: 90_000_000_000)
-                throw TubeError.message("YouTube не ответил за 90 секунд. Проверьте прокси и попробуйте ещё раз.")
+                throw TubeError.message(L10n.text(
+                    "YouTube не ответил за 90 секунд. Проверьте прокси и попробуйте ещё раз.",
+                    "YouTube did not respond within 90 seconds. Check the proxy and try again."
+                ))
             }
             defer { group.cancelAll() }
             return try await group.next()!
         }
         try Task.checkCancellation()
-        progress("Получение названия и выбор формата…")
+        progress(L10n.text("Получение названия и выбор формата…", "Retrieving the title and selecting a format…"))
         let metadata = try? await video.metadata
-        let title = metadata?.title ?? "YouTube-видео"
+        let title = metadata?.title ?? L10n.text("YouTube-видео", "YouTube video")
         let duration = metadata?.duration
         let headers = ["User-Agent": "Mozilla/5.0"]
         let combinedStreams = streams.filter { $0.fileExtension == .mp4 && $0.includesVideoAndAudioTrack && $0.videoCodec == .avc1 && $0.audioCodec == .mp4a }
         let videoStreams = streams.filter { $0.fileExtension == .mp4 && $0.includesVideoTrack && !$0.includesAudioTrack && $0.videoCodec == .avc1 }
         guard let selectedVideo = preferredVideo(combinedStreams + videoStreams, maxHeight: maxVideoHeight) else {
-            throw TubeError.message("Для этого видео нет совместимого потока H.264.")
+            throw TubeError.message(L10n.text(
+                "Для этого видео нет совместимого потока H.264.",
+                "No compatible H.264 stream is available for this video."
+            ))
         }
         if selectedVideo.includesVideoAndAudioTrack {
             let combined = selectedVideo
@@ -104,9 +116,12 @@ enum MediaExtractor {
         guard let audioStream = streams
                 .filter({ $0.fileExtension == .m4a && $0.includesAudioTrack && !$0.includesVideoTrack && $0.audioCodec == .mp4a })
                 .max(by: { ($0.bitrate ?? 0) < ($1.bitrate ?? 0) }) else {
-            throw TubeError.message("Для этого видео нет совместимых потоков H.264 и AAC.")
+            throw TubeError.message(L10n.text(
+                "Для этого видео нет совместимых потоков H.264 и AAC.",
+                "No compatible H.264 and AAC streams are available for this video."
+            ))
         }
-        progress("Подготовка потоковой передачи…")
+        progress(L10n.text("Подготовка потоковой передачи…", "Preparing the stream…"))
         StreamingLog.stream.info("Selected split streams: videoHeight=\(videoStream.videoResolution ?? 0), videoBitrate=\(videoStream.bitrate ?? 0), audioBitrate=\(audioStream.bitrate ?? 0), duration=\(duration ?? 0, format: .fixed(precision: 3))")
         return MediaSource(url: videoStream.url, fileURL: nil, title: title, headers: headers,
                            audioURL: audioStream.url, duration: duration,
@@ -144,7 +159,9 @@ final class MediaServer {
 
     init() throws {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw TubeError.message("Не удалось открыть локальный сервер.") }
+        guard fd >= 0 else {
+            throw TubeError.message(L10n.text("Не удалось открыть локальный сервер.", "Could not open the local server."))
+        }
         var yes: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
         var address = sockaddr_in()
@@ -159,7 +176,7 @@ final class MediaServer {
         }
         guard bound == 0, listen(fd, 16) == 0 else {
             close(fd)
-            throw TubeError.message("Не удалось запустить локальный сервер.")
+            throw TubeError.message(L10n.text("Не удалось запустить локальный сервер.", "Could not start the local server."))
         }
         var size = socklen_t(MemoryLayout<sockaddr_in>.size)
         getsockname(fd, withUnsafeMutablePointer(to: &address) {
@@ -196,17 +213,21 @@ final class MediaServer {
         remote.sin_family = sa_family_t(AF_INET)
         remote.sin_port = UInt16(80).bigEndian
         guard inet_pton(AF_INET, device.host, &remote.sin_addr) == 1 || Self.resolve(device.host, into: &remote) else {
-            throw TubeError.message("Не удалось определить адрес телевизора.")
+            throw TubeError.message(L10n.text("Не удалось определить адрес телевизора.", "Could not resolve the TV address."))
         }
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
-        guard fd >= 0 else { throw TubeError.message("Нет сетевого соединения с телевизором.") }
+        guard fd >= 0 else {
+            throw TubeError.message(L10n.text("Нет сетевого соединения с телевизором.", "There is no network connection to the TV."))
+        }
         defer { close(fd) }
         let result = withUnsafePointer(to: &remote) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard result == 0 else { throw TubeError.message("Нет сетевого маршрута к телевизору.") }
+        guard result == 0 else {
+            throw TubeError.message(L10n.text("Нет сетевого маршрута к телевизору.", "There is no network route to the TV."))
+        }
         var local = sockaddr_in()
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         let named = withUnsafeMutablePointer(to: &local) { pointer in
@@ -214,7 +235,7 @@ final class MediaServer {
         }
         var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
         guard named == 0, inet_ntop(AF_INET, &local.sin_addr, &buffer, socklen_t(buffer.count)) != nil else {
-            throw TubeError.message("Не удалось определить локальный IP-адрес Mac.")
+            throw TubeError.message(L10n.text("Не удалось определить локальный IP-адрес Mac.", "Could not determine the Mac's local IP address."))
         }
         lock.lock()
         let transportStream = media?.isTransportStream == true

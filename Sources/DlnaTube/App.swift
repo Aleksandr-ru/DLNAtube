@@ -14,9 +14,9 @@ struct DlnaTubeApp: App {
         .defaultSize(width: 600, height: 450)
         .windowResizability(.contentSize)
         .commands {
-            DLNAtubeCommands()
+            DLNAtubeCommands(language: model.language)
         }
-        Window("Настройки", id: "settings") {
+        Window(L10n.text("Настройки", "Settings", language: model.language), id: "settings") {
             SettingsView(model: model)
                 .frame(width: 430)
                 .padding(24)
@@ -27,16 +27,17 @@ struct DlnaTubeApp: App {
 
 private struct DLNAtubeCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    let language: AppLanguage
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
-            Button("Настройки…") {
+            Button(L10n.text("Настройки…", "Settings…", language: language)) {
                 openWindow(id: "settings")
             }
             .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(replacing: .appInfo) {
-            Button("О программе DLNAtube") {
+            Button(L10n.text("О программе DLNAtube", "About DLNAtube", language: language)) {
                 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
                 NSApp.orderFrontStandardAboutPanel(options: [
                     .applicationVersion: version,
@@ -87,12 +88,12 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 7) {
-                Text("Устройство воспроизведения")
+                Text(L10n.text("Устройство воспроизведения", "Playback device"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
-                    Picker("Устройство воспроизведения", selection: $model.selectedDeviceID) {
-                        Text("Выберите устройство").tag("")
+                    Picker(L10n.text("Устройство воспроизведения", "Playback device"), selection: $model.selectedDeviceID) {
+                        Text(L10n.text("Выберите устройство", "Select a device")).tag("")
                         ForEach(model.devices) { device in
                             Text(device.name).tag(device.id)
                         }
@@ -102,7 +103,7 @@ struct ContentView: View {
                     Button {
                         model.discover()
                     } label: {
-                        Label("Найти устройства", systemImage: "arrow.clockwise")
+                        Label(L10n.text("Найти устройства", "Find devices"), systemImage: "arrow.clockwise")
                     }
                     .disabled(model.discovering)
                 }
@@ -110,17 +111,18 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 7) {
-                Text("Ссылка на YouTube")
+                Text(L10n.text("Ссылка на YouTube", "YouTube URL"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack {
                     VideoURLHistoryField(
                         text: $model.videoURL,
                         history: model.videoHistory,
+                        language: model.language,
                         onSubmit: { model.cast() }
                     )
                     .frame(maxWidth: .infinity)
-                    Picker("Качество", selection: Binding(
+                    Picker(L10n.text("Качество", "Quality"), selection: Binding(
                         get: { model.desiredQuality },
                         set: { model.selectVideoQuality($0) }
                     )) {
@@ -130,12 +132,12 @@ struct ContentView: View {
                     }
                     .labelsHidden()
                     .frame(width: 112)
-                    .help("Максимальное желаемое качество видео")
+                    .help(L10n.text("Максимальное желаемое качество видео", "Maximum preferred video quality"))
                     .disabled(model.selectedDeviceID.isEmpty)
                     if model.preparing {
-                        Button("Отменить") { model.cancelPreparation() }
+                        Button(L10n.text("Отменить", "Cancel")) { model.cancelPreparation() }
                     } else {
-                        Button("Воспроизвести") { model.cast() }
+                        Button(L10n.text("Воспроизвести", "Play")) { model.cast() }
                             .buttonStyle(.borderedProminent)
                             .disabled(model.busy || model.selectedDeviceID.isEmpty || model.videoURL.isEmpty)
                     }
@@ -145,7 +147,7 @@ struct ContentView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(model.title.isEmpty ? "Нет воспроизведения" : model.title)
+                Text(model.title.isEmpty ? L10n.text("Нет воспроизведения", "Nothing playing") : model.title)
                     .font(.headline)
                     .lineLimit(1)
                 HStack(spacing: 14) {
@@ -189,7 +191,7 @@ struct ContentView: View {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
-                .help("Настройки")
+                .help(L10n.text("Настройки", "Settings"))
             }
             .frame(height: 32)
         }
@@ -214,22 +216,22 @@ struct ContentView: View {
 
     private var deviceCapabilitiesPanel: some View {
         let videoFormats = model.capabilities.map {
-            $0.videoFormats.isEmpty ? "не объявлены" : $0.videoFormats.joined(separator: ", ")
+            $0.videoFormats.isEmpty ? L10n.text("не объявлены", "not reported") : $0.videoFormats.joined(separator: ", ")
         } ?? capabilityPlaceholder
         let audioFormats = model.capabilities.map {
-            $0.audioFormats.isEmpty ? "не объявлен" : $0.audioFormats.joined(separator: ", ")
+            $0.audioFormats.isEmpty ? L10n.text("не объявлен", "not reported") : $0.audioFormats.joined(separator: ", ")
         } ?? capabilityPlaceholder
         let resolution = model.capabilities?.resolution ?? capabilityPlaceholder
 
         return VStack(alignment: .leading, spacing: 5) {
-            Text("Поддержка DLNA")
+            Text(L10n.text("Поддержка DLNA", "DLNA support"))
                 .font(.caption.weight(.semibold))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Видео: \(videoFormats)")
+                Text(L10n.text("Видео: \(videoFormats)", "Video: \(videoFormats)"))
                     .help(model.capabilities?.videoFormats.joined(separator: ", ") ?? capabilityErrorHelp)
-                Text("Звук: \(audioFormats)")
+                Text(L10n.text("Звук: \(audioFormats)", "Audio: \(audioFormats)"))
                     .help(model.capabilities?.audioFormats.joined(separator: ", ") ?? capabilityErrorHelp)
-                Text("Разрешение: \(resolution)")
+                Text(L10n.text("Разрешение: \(resolution)", "Resolution: \(resolution)"))
             }
             .font(.caption)
             .lineLimit(1)
@@ -244,8 +246,8 @@ struct ContentView: View {
     }
 
     private var capabilityPlaceholder: String {
-        if model.loadingCapabilities { return "получение…" }
-        if model.capabilityMessage != nil { return "недоступно" }
+        if model.loadingCapabilities { return L10n.text("получение…", "retrieving…") }
+        if model.capabilityMessage != nil { return L10n.text("недоступно", "unavailable") }
         return "—"
     }
 
@@ -257,6 +259,7 @@ struct ContentView: View {
 private struct VideoURLHistoryField: View {
     @Binding var text: String
     let history: [VideoHistoryEntry]
+    let language: AppLanguage
     let onSubmit: () -> Void
 
     @State private var showingChoices = false
@@ -298,11 +301,11 @@ private struct VideoURLHistoryField: View {
     private var choices: some View {
         VStack(alignment: .leading, spacing: 0) {
             if history.isEmpty {
-                Text("История воспроизведения пуста")
+                Text(L10n.text("История воспроизведения пуста", "Playback history is empty", language: language))
                     .foregroundStyle(.secondary)
                     .padding(12)
             } else if matches.isEmpty {
-                Text("Совпадений не найдено")
+                Text(L10n.text("Совпадений не найдено", "No matches found", language: language))
                     .foregroundStyle(.secondary)
                     .padding(12)
             } else {
@@ -340,36 +343,62 @@ private struct VideoURLHistoryField: View {
 
 struct SettingsView: View {
     @ObservedObject var model: PlayerModel
+    @State private var proxyDraft: String
+    @State private var languageDraft: AppLanguage
     @State private var saveError: String?
+
+    init(model: PlayerModel) {
+        self.model = model
+        _proxyDraft = State(initialValue: model.proxyURL)
+        _languageDraft = State(initialValue: model.language)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Сеть").font(.title2.weight(.semibold))
-            Text("Прокси используется для доступа Mac к YouTube и медиапотоку. Поиск телевизора работает через локальную сеть.")
+            Text(L10n.text("Настройки", "Settings")).font(.title2.weight(.semibold))
+            Picker(L10n.text("Язык", "Language"), selection: $languageDraft) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(language.displayName).tag(language)
+                }
+            }
+            .pickerStyle(.segmented)
+            Divider()
+            Text(L10n.text("Сеть", "Network")).font(.headline)
+            Text(L10n.text(
+                "Прокси используется для доступа Mac к YouTube и медиапотоку. Поиск телевизора работает через локальную сеть.",
+                "The proxy is used by the Mac to access YouTube and the media stream. TV discovery uses the local network."
+            ))
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            TextField("Прокси, например http://127.0.0.1:8080", text: $model.proxyURL)
+            TextField(L10n.text("Прокси, например http://127.0.0.1:8080", "Proxy, for example http://127.0.0.1:8080"), text: $proxyDraft)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit { save() }
-                .onChange(of: model.proxyURL) { _ in saveError = nil }
+                .onChange(of: proxyDraft) { _ in saveError = nil }
             if let saveError {
                 Text(saveError)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
-            Text("Поддерживаются HTTP, HTTPS и SOCKS5. Пустое поле использует системные настройки сети.")
+            Text(L10n.text(
+                "Поддерживаются HTTP, HTTPS и SOCKS5. Пустое поле использует системные настройки сети.",
+                "HTTP, HTTPS, and SOCKS5 are supported. Leave the field empty to use the system network settings."
+            ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("Сохранить") { save() }
+                Button(L10n.text("Сохранить", "Save")) { save() }
                     .buttonStyle(.borderedProminent)
             }
+        }
+        .onAppear {
+            proxyDraft = model.proxyURL
+            languageDraft = model.language
+            saveError = nil
         }
     }
 
     private func save() {
-        if model.saveProxy() {
+        if model.saveSettings(proxy: proxyDraft, language: languageDraft) {
             NSApp.keyWindow?.close()
         } else {
             saveError = model.errorMessage

@@ -180,10 +180,40 @@ struct TransportState {
 }
 
 struct RendererCapabilities: Equatable {
+    enum Resolution: Equatable {
+        case profile(Int)
+        case unspecifiedHD
+        case unspecifiedSD
+        case unavailable
+    }
+
     let videoFormats: [String]
     let audioFormats: [String]
-    let resolution: String
+    let resolutionKind: Resolution
     let maxVideoHeight: Int?
+
+    var resolution: String { resolutionText() }
+
+    func resolutionText(language: AppLanguage? = nil) -> String {
+        switch resolutionKind {
+        case .profile(let height):
+            return L10n.text("Указан профиль \(height)p", "Reported \(height)p profile", language: language)
+        case .unspecifiedHD:
+            return L10n.text(
+                "Есть HD-профили; точный предел не указан",
+                "HD profiles are available; the exact limit is not reported",
+                language: language
+            )
+        case .unspecifiedSD:
+            return L10n.text(
+                "Есть SD-профили; точный предел не указан",
+                "SD profiles are available; the exact limit is not reported",
+                language: language
+            )
+        case .unavailable:
+            return L10n.text("Не указано устройством", "Not reported by the device", language: language)
+        }
+    }
 
     init(protocolInfo: String) {
         var video = Set<String>()
@@ -228,25 +258,25 @@ struct RendererCapabilities: Equatable {
 
         let names = profiles.joined(separator: " ")
         if names.contains("4320P") || names.contains("8K") {
-            resolution = "Указан профиль 4320p"
+            resolutionKind = .profile(4320)
             maxVideoHeight = 4320
         } else if names.contains("2160P") || names.contains("4K") {
-            resolution = "Указан профиль 2160p"
+            resolutionKind = .profile(2160)
             maxVideoHeight = 2160
         } else if names.contains("1080P") {
-            resolution = "Указан профиль 1080p"
+            resolutionKind = .profile(1080)
             maxVideoHeight = 1080
         } else if names.contains("720P") {
-            resolution = "Указан профиль 720p"
+            resolutionKind = .profile(720)
             maxVideoHeight = 720
         } else if names.contains("_HD_") {
-            resolution = "Есть HD-профили; точный предел не указан"
+            resolutionKind = .unspecifiedHD
             maxVideoHeight = 720
         } else if names.contains("_SD_") {
-            resolution = "Есть SD-профили; точный предел не указан"
+            resolutionKind = .unspecifiedSD
             maxVideoHeight = 480
         } else {
-            resolution = "Не указано устройством"
+            resolutionKind = .unavailable
             maxVideoHeight = nil
         }
     }
@@ -259,7 +289,10 @@ struct RendererCapabilities: Equatable {
 enum DLNA {
     static func capabilities(device: Renderer) async throws -> RendererCapabilities {
         guard let url = device.connectionURL, let service = device.connectionServiceType else {
-            throw TubeError.message("Устройство не предоставляет список поддерживаемых форматов.")
+            throw TubeError.message(L10n.text(
+                "Устройство не предоставляет список поддерживаемых форматов.",
+                "The device does not provide a supported format list."
+            ))
         }
         let body = """
         <?xml version="1.0" encoding="utf-8"?>
@@ -273,10 +306,16 @@ enum DLNA {
         request.httpBody = Data(body.utf8)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw TubeError.message("Не удалось получить форматы устройства.")
+            throw TubeError.message(L10n.text(
+                "Не удалось получить форматы устройства.",
+                "Could not retrieve the device formats."
+            ))
         }
         guard let sink = XMLTools.fields(data)["Sink"], !sink.isEmpty else {
-            throw TubeError.message("Устройство не сообщает поддерживаемые форматы.")
+            throw TubeError.message(L10n.text(
+                "Устройство не сообщает поддерживаемые форматы.",
+                "The device did not report its supported formats."
+            ))
         }
         return RendererCapabilities(protocolInfo: sink)
     }
@@ -298,7 +337,10 @@ enum DLNA {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let fields = XMLTools.fields(data)
-            throw TubeError.message(fields["errorDescription"] ?? "Телевизор отклонил команду \(action).")
+            throw TubeError.message(fields["errorDescription"] ?? L10n.text(
+                "Телевизор отклонил команду \(action).",
+                "The TV rejected the \(action) command."
+            ))
         }
         return XMLTools.fields(data)
     }

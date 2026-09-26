@@ -12,8 +12,9 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var videoHistory: [VideoHistoryEntry]
     @Published private(set) var desiredQuality: VideoQuality = .p720
     @Published var proxyURL = UserDefaults.standard.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
+    @Published private(set) var language = AppLanguage.current
     @Published var title = ""
-    @Published var status = "Готово"
+    @Published var status = L10n.text("Готово", "Ready")
     @Published var errorMessage: String?
     @Published var discovering = false
     @Published var busy = false
@@ -41,7 +42,7 @@ final class PlayerModel: ObservableObject {
     init() {
         let defaults = UserDefaults.standard
         let oldPreferences = defaults.persistentDomain(forName: "app.dlnatube.DlnaTube") ?? [:]
-        for key in [ProxySettings.preferenceKey, "videoHistory", VideoQuality.preferencesByDeviceKey]
+        for key in [ProxySettings.preferenceKey, AppLanguage.preferenceKey, "videoHistory", VideoQuality.preferencesByDeviceKey]
             where defaults.object(forKey: key) == nil {
             if let value = oldPreferences[key] { defaults.set(value, forKey: key) }
         }
@@ -50,6 +51,8 @@ final class PlayerModel: ObservableObject {
         var seen = Set<String>()
         videoHistory = entries.filter { !$0.url.isEmpty && seen.insert($0.url).inserted }.prefix(100).map { $0 }
         proxyURL = defaults.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
+        language = AppLanguage.current
+        status = L10n.text("Готово", "Ready")
         if let data = defaults.data(forKey: VideoQuality.preferencesByDeviceKey),
            let stored = try? JSONDecoder().decode([String: Int].self, from: data) {
             qualityByDevice = stored.reduce(into: [:]) { result, item in
@@ -61,13 +64,13 @@ final class PlayerModel: ObservableObject {
     func discover(startup: Bool = false) {
         guard !discovering else { return }
         discovering = true
-        status = "Поиск устройств…"
+        status = L10n.text("Поиск устройств…", "Searching for devices…")
         errorMessage = nil
         Task {
             var result: [Renderer] = []
             for attempt in 0..<(startup ? 3 : 1) {
                 if attempt > 0 {
-                    status = "Повторный поиск устройств…"
+                    status = L10n.text("Повторный поиск устройств…", "Searching for devices again…")
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }
                 result = await SSDP.discover()
@@ -80,8 +83,11 @@ final class PlayerModel: ObservableObject {
             }
             loadCapabilities()
             status = result.isEmpty
-                ? "DLNA-устройства не найдены. Проверьте сеть и разрешение «Локальная сеть» для DLNAtube в настройках macOS."
-                : "Найдено устройств: \(result.count)"
+                ? L10n.text(
+                    "DLNA-устройства не найдены. Проверьте сеть и разрешение «Локальная сеть» для DLNAtube в настройках macOS.",
+                    "No DLNA devices found. Check the network and the Local Network permission for DLNAtube in macOS Settings."
+                )
+                : L10n.text("Найдено устройств: \(result.count)", "Devices found: \(result.count)")
         }
     }
 
@@ -142,13 +148,15 @@ final class PlayerModel: ObservableObject {
     }
 
     @discardableResult
-    func saveProxy() -> Bool {
+    func saveSettings(proxy: String, language newLanguage: AppLanguage) -> Bool {
         do {
-            let normalized = try ProxySettings.normalized(proxyURL)
+            let normalized = try ProxySettings.normalized(proxy)
             UserDefaults.standard.set(normalized ?? "", forKey: ProxySettings.preferenceKey)
+            UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.preferenceKey)
             proxyURL = normalized ?? ""
+            language = newLanguage
             errorMessage = nil
-            status = "Настройки прокси сохранены"
+            status = L10n.text("Настройки сохранены", "Settings saved")
             return true
         } catch {
             show(error)
@@ -163,7 +171,7 @@ final class PlayerModel: ObservableObject {
         busy = true
         preparing = true
         errorMessage = nil
-        status = "Получение видеопотока…"
+        status = L10n.text("Получение видеопотока…", "Retrieving the video stream…")
         pendingDevice = device
         castTask = Task {
             do {
@@ -187,7 +195,7 @@ final class PlayerModel: ObservableObject {
                 }
                 server.set(source, proxy: proxy)
                 let localURL = try server.url(for: device)
-                status = "Подключение к телевизору…"
+                status = L10n.text("Подключение к телевизору…", "Connecting to the TV…")
                 try Task.checkCancellation()
                 try await DLNA.setMedia(localURL, title: source.title, device: device, isTransportStream: source.isTransportStream)
                 try Task.checkCancellation()
@@ -207,7 +215,7 @@ final class PlayerModel: ObservableObject {
                 status = playbackStatus(playing: true, deviceName: device.name, source: source)
                 startPolling()
             } catch is CancellationError {
-                status = "Подготовка отменена"
+                status = L10n.text("Подготовка отменена", "Preparation cancelled")
                 errorMessage = nil
             } catch { show(error) }
             busy = false
@@ -246,7 +254,7 @@ final class PlayerModel: ObservableObject {
     func cancelPreparation() {
         guard preparing else { return }
         castTask?.cancel()
-        status = "Отмена подготовки…"
+        status = L10n.text("Отмена подготовки…", "Cancelling preparation…")
     }
 
     func togglePlayback() {
@@ -279,7 +287,7 @@ final class PlayerModel: ObservableObject {
                 playing = false
                 playbackBase = 0
                 position = 0
-                status = "Остановлено"
+                status = L10n.text("Остановлено", "Stopped")
                 errorMessage = nil
             } catch { show(error) }
             busy = false
@@ -292,12 +300,17 @@ final class PlayerModel: ObservableObject {
         let target = min(max(0, seconds), max(0, duration - 1))
         busy = true
         pollTask?.cancel()
-        status = "Перемотка на \(DLNA.clock(target))…"
+        status = L10n.text("Перемотка на \(DLNA.clock(target))…", "Seeking to \(DLNA.clock(target))…")
         Task {
             var succeeded = false
             do {
                 if source.isTransportStream {
-                    guard let server else { throw TubeError.message("Локальный медиасервер недоступен.") }
+                    guard let server else {
+                        throw TubeError.message(L10n.text(
+                            "Локальный медиасервер недоступен.",
+                            "The local media server is unavailable."
+                        ))
+                    }
                     let wasPlaying = playing
                     _ = try? await DLNA.command("Stop", device: device)
                     server.set(source, proxy: currentProxy, startSeconds: target)
@@ -374,8 +387,8 @@ final class PlayerModel: ObservableObject {
 
     private func playbackStatus(playing: Bool, deviceName: String? = nil,
                                 source: MediaSource? = nil) -> String {
-        var text = playing ? "Воспроизведение" : "Пауза"
-        if let deviceName { text += " на \(deviceName)" }
+        var text = playing ? L10n.text("Воспроизведение", "Playing") : L10n.text("Пауза", "Paused")
+        if let deviceName { text += L10n.text(" на \(deviceName)", " on \(deviceName)") }
         if let height = (source ?? currentSource)?.videoHeight {
             text += " • \(VideoQuality.title(for: height))"
         }

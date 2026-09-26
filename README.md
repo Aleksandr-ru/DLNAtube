@@ -4,6 +4,8 @@
 
 **English:** The application supports an English interface. See the [English README](README.en.md).
 
+![DLNAtube screenshot](./Screenshots/01.png?raw=true)
+
 ## Сборка и запуск
 
 Требуются macOS 13 или новее и Xcode Command Line Tools со Swift 5.9+, `clang` и `make`.

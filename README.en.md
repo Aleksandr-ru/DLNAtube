@@ -4,6 +4,8 @@ A minimalist macOS application that plays YouTube videos on TVs and other DLNA/U
 
 **Русский:** Приложение поддерживает русский интерфейс. См. [README на русском языке](README.md).
 
+![DLNAtube screenshot](./Screenshots/02.png?raw=true)
+
 ## Building and running
 
 Requires macOS 13 or later and Xcode Command Line Tools with Swift 5.9+, `clang`, and `make`.

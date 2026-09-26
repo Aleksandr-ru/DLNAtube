@@ -174,9 +174,11 @@ enum SSDP {
 }
 
 struct TransportState {
-    let playing: Bool
+    let name: String
     let position: Double
     let duration: Double
+
+    var playing: Bool { name == "PLAYING" }
 }
 
 struct RendererCapabilities: Equatable {
@@ -361,7 +363,7 @@ enum DLNA {
         let transport = try await command("GetTransportInfo", device: device)
         let position = try await command("GetPositionInfo", device: device)
         return TransportState(
-            playing: transport["CurrentTransportState"] == "PLAYING",
+            name: transport["CurrentTransportState"] ?? "UNKNOWN",
             position: seconds(position["RelTime"] ?? ""),
             duration: seconds(position["TrackDuration"] ?? "")
         )

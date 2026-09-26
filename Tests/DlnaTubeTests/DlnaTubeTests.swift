@@ -60,6 +60,36 @@ final class DlnaTubeTests: XCTestCase {
         XCTAssertEqual(AppLanguage.systemDefault(preferredLanguages: []), .english)
     }
 
+    func testPlaybackTimelineKeepsMovingWhenTVPositionIsMissingOrStale() {
+        var timeline = PlaybackTimeline()
+        timeline.reset(position: 120, playing: true, uptime: 10)
+        XCTAssertEqual(
+            timeline.reconcile(
+                reportedPosition: nil, remotePlaying: true, uptime: 15,
+                duration: 300, keepClockMoving: true
+            ),
+            125,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            timeline.reconcile(
+                reportedPosition: 121, remotePlaying: true, uptime: 20,
+                duration: 300, keepClockMoving: true
+            ),
+            130,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            timeline.reconcile(
+                reportedPosition: nil, remotePlaying: false, uptime: 25,
+                duration: 300, keepClockMoving: true
+            ),
+            135,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(timeline.estimatedPosition(at: 40, duration: 300), 135, accuracy: 0.001)
+    }
+
     func testLocalMediaRange() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("DlnaTube-test-\(UUID().uuidString).mp4")
         try Data("abcdefghij".utf8).write(to: file)

@@ -47,13 +47,13 @@ enum MediaBridge {
     }
 
     static func stream(video: URL, audio: URL, proxy: String?, startSeconds: Double,
-                       client: Int32, requestID: String, onStart: @escaping (Double) -> Void) {
+                       client: Int32, requestID: String, onStart: @escaping (Double) -> Void) -> Bool {
         guard let function,
               let provider = RangeProvider(video: video, audio: audio, proxy: proxy,
                                            requestID: requestID, onStart: onStart) else {
             StreamingLog.stream.error("MPEG-TS initialization failed: id=\(requestID, privacy: .public)")
             sendBadGateway(client)
-            return
+            return false
         }
         StreamingLog.stream.info("MPEG-TS started: id=\(requestID, privacy: .public), videoBytes=\(provider.sizes[0]), audioBytes=\(provider.sizes[1]), start=\(startSeconds, format: .fixed(precision: 3))")
         let opaque = Unmanaged.passUnretained(provider).toOpaque()
@@ -66,6 +66,7 @@ enum MediaBridge {
         } else {
             StreamingLog.stream.error("MPEG-TS stopped: id=\(requestID, privacy: .public), result=\(result), reason=\(resultDescription(result), privacy: .public)")
         }
+        return result >= 0
     }
 
     private static func resultDescription(_ result: Int32) -> String {

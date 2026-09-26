@@ -156,6 +156,7 @@ final class MediaServer {
     private var playbackToken = UUID().uuidString
     private var startSeconds: Double = 0
     private var actualStartSeconds: Double = 0
+    private var streamCompleted = false
 
     init() throws {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
@@ -195,6 +196,7 @@ final class MediaServer {
         self.proxy = proxy
         self.startSeconds = max(0, startSeconds)
         actualStartSeconds = self.startSeconds
+        streamCompleted = false
         playbackToken = UUID().uuidString
         lock.unlock()
         let kind = source.isTransportStream ? "mpeg-ts" : "mp4"
@@ -205,6 +207,12 @@ final class MediaServer {
         lock.lock()
         defer { lock.unlock() }
         return actualStartSeconds
+    }
+
+    func playbackCompleted() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return streamCompleted
     }
 
     func url(for device: Renderer) throws -> URL {
@@ -311,14 +319,18 @@ final class MediaServer {
             if parts[0] == "HEAD" {
                 _ = writeAll(client, Data("HTTP/1.1 200 OK\r\nContent-Type: video/mpeg\r\ntransferMode.dlna.org: Streaming\r\ncontentFeatures.dlna.org: DLNA.ORG_PN=AVC_TS_MP_HD_AAC_ISO;DLNA.ORG_OP=00\r\nConnection: close\r\n\r\n".utf8))
             } else {
-                MediaBridge.stream(video: video, audio: audio, proxy: proxy,
-                                   startSeconds: startSeconds, client: client,
-                                   requestID: requestID) { [weak self] actual in
+                let completed = MediaBridge.stream(
+                    video: video, audio: audio, proxy: proxy,
+                    startSeconds: startSeconds, client: client, requestID: requestID
+                ) { [weak self] actual in
                     guard let self else { return }
                     self.lock.lock()
                     if self.playbackToken == playbackToken { self.actualStartSeconds = max(0, actual) }
                     self.lock.unlock()
                 }
+                lock.lock()
+                if self.playbackToken == playbackToken { streamCompleted = completed }
+                lock.unlock()
             }
             return
         }

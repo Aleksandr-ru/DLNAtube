@@ -1,6 +1,40 @@
 import Foundation
 import SwiftUI
 
+struct PlaybackTimeline {
+    private(set) var position: Double = 0
+    private(set) var playing = false
+    private var anchorUptime: TimeInterval = 0
+
+    mutating func reset(position: Double, playing: Bool, uptime: TimeInterval) {
+        self.position = max(0, position)
+        self.playing = playing
+        anchorUptime = uptime
+    }
+
+    func estimatedPosition(at uptime: TimeInterval, duration: Double) -> Double {
+        let elapsed = playing ? max(0, uptime - anchorUptime) : 0
+        let estimate = position + elapsed
+        return duration > 0 ? min(duration, estimate) : estimate
+    }
+
+    mutating func reconcile(reportedPosition: Double?, remotePlaying: Bool,
+                            uptime: TimeInterval, duration: Double,
+                            keepClockMoving: Bool) -> Double {
+        let estimate = estimatedPosition(at: uptime, duration: duration)
+        let validReport = reportedPosition.flatMap { $0 > 0 ? $0 : nil }
+        let resolved: Double
+        if keepClockMoving {
+            resolved = max(estimate, validReport ?? 0)
+        } else {
+            resolved = validReport ?? estimate
+        }
+        reset(position: duration > 0 ? min(duration, resolved) : resolved,
+              playing: remotePlaying, uptime: uptime)
+        return position
+    }
+}
+
 @MainActor
 final class PlayerModel: ObservableObject {
     @Published var devices: [Renderer] = []
@@ -31,6 +65,7 @@ final class PlayerModel: ObservableObject {
     private var currentSource: MediaSource?
     private var currentProxy: String?
     private var playbackBase: Double = 0
+    private var playbackTimeline = PlaybackTimeline()
     private var pollTask: Task<Void, Never>?
     private var castTask: Task<Void, Never>?
     private var capabilityTask: Task<Void, Never>?
@@ -210,6 +245,8 @@ final class PlayerModel: ObservableObject {
                 playing = true
                 position = 0
                 duration = source.duration ?? 0
+                playbackTimeline.reset(position: 0, playing: true,
+                                       uptime: ProcessInfo.processInfo.systemUptime)
                 canSeek = duration > 0
                 hasMedia = true
                 status = playbackStatus(playing: true, deviceName: device.name, source: source)
@@ -269,6 +306,11 @@ final class PlayerModel: ObservableObject {
                     _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
                 }
                 playing = !wasPlaying
+                position = playbackTimeline.estimatedPosition(
+                    at: ProcessInfo.processInfo.systemUptime, duration: duration
+                )
+                playbackTimeline.reset(position: position, playing: playing,
+                                       uptime: ProcessInfo.processInfo.systemUptime)
                 status = playbackStatus(playing: playing)
                 errorMessage = nil
                 startPolling()
@@ -284,10 +326,7 @@ final class PlayerModel: ObservableObject {
         Task {
             do {
                 _ = try await DLNA.command("Stop", device: device)
-                playing = false
-                playbackBase = 0
-                position = 0
-                status = L10n.text("Остановлено", "Stopped")
+                applyStoppedState()
                 errorMessage = nil
             } catch { show(error) }
             busy = false
@@ -328,6 +367,8 @@ final class PlayerModel: ObservableObject {
                     ])
                 }
                 position = target
+                playbackTimeline.reset(position: target, playing: playing,
+                                       uptime: ProcessInfo.processInfo.systemUptime)
                 errorMessage = nil
                 status = playbackStatus(playing: playing)
                 succeeded = true
@@ -352,16 +393,45 @@ final class PlayerModel: ObservableObject {
                             StreamingLog.dlna.info("DLNA polling recovered: device=\(device.name, privacy: .public)")
                             lastPollingError = nil
                         }
-                        if playing && !state.playing {
-                            StreamingLog.dlna.error("TV left PLAYING state: device=\(device.name, privacy: .public), position=\(state.position, format: .fixed(precision: 3)), duration=\(state.duration, format: .fixed(precision: 3))")
+                        let wasPlaying = playing
+                        if wasPlaying && !state.playing {
+                            StreamingLog.dlna.error("TV left PLAYING state: device=\(device.name, privacy: .public), state=\(state.name, privacy: .public), position=\(state.position, format: .fixed(precision: 3)), duration=\(state.duration, format: .fixed(precision: 3))")
                         }
-                        playing = state.playing
-                        if currentSource?.isTransportStream == true, let server {
+                        let transportStream = currentSource?.isTransportStream == true
+                        if transportStream, let server {
                             playbackBase = server.playbackStart()
                         }
-                        let reportedPosition = max(0, playbackBase + state.position)
-                        position = duration > 0 ? min(duration, reportedPosition) : reportedPosition
-                        if state.duration > 0 { duration = state.duration }
+                        if duration <= 0, state.duration > 0 {
+                            duration = transportStream ? playbackBase + state.duration : state.duration
+                            canSeek = duration > 0
+                        }
+                        let absoluteReport = state.position > 0
+                            ? max(0, (transportStream ? playbackBase : 0) + state.position)
+                            : nil
+                        let uptime = ProcessInfo.processInfo.systemUptime
+                        position = playbackTimeline.reconcile(
+                            reportedPosition: absoluteReport,
+                            remotePlaying: state.playing,
+                            uptime: uptime,
+                            duration: duration,
+                            keepClockMoving: transportStream
+                        )
+                        let streamFinished = transportStream && server?.playbackCompleted() == true
+                        let nearEnd = duration > 0 && position >= max(0, duration - 5)
+                        let finished = duration > 0 && (
+                            (position >= duration && streamFinished) ||
+                            (state.name == "STOPPED" && (streamFinished || nearEnd))
+                        )
+                        if finished {
+                            applyStoppedState(uptime: uptime)
+                            return
+                        }
+                        playing = state.playing
+                        if wasPlaying != playing {
+                            status = state.name == "STOPPED"
+                                ? L10n.text("Остановлено", "Stopped")
+                                : playbackStatus(playing: playing)
+                        }
                     } catch {
                         let message = error.localizedDescription
                         if lastPollingError != message {
@@ -393,6 +463,14 @@ final class PlayerModel: ObservableObject {
             text += " • \(VideoQuality.title(for: height))"
         }
         return text
+    }
+
+    private func applyStoppedState(uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        playing = false
+        playbackBase = 0
+        position = 0
+        playbackTimeline.reset(position: 0, playing: false, uptime: uptime)
+        status = L10n.text("Остановлено", "Stopped")
     }
 
     private func show(_ error: Error) {

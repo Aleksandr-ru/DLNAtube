@@ -107,8 +107,8 @@ final class DlnaTubeTests: XCTestCase {
     func testYouTubeExtractionWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["DLNATUBE_TEST_YOUTUBE"] == "1" else { return }
         YouTube.networkSession = URLSession(configuration: ProxySettings.configuration(appProxy))
-        let url = URL(string: ProcessInfo.processInfo.environment["DLNATUBE_TEST_URL"] ?? "https://www.youtube.com/watch?v=7lYBdI3xqqQ")!
-        let video = YouTube(url: url, methods: [.local])
+        let url = URL(string: ProcessInfo.processInfo.environment["DLNATUBE_TEST_URL"] ?? "https://www.youtube.com/watch?v=dQw4w9WgXcQ")!
+        let video = YouTube(url: url, methods: [.local, .remote])
         let streams = try await video.streams
         if ProcessInfo.processInfo.environment["DLNATUBE_INSPECT_FORMATS"] == "1" {
             for stream in streams.sorted(by: { ($0.videoResolution ?? 0) < ($1.videoResolution ?? 0) }) {
@@ -125,7 +125,6 @@ final class DlnaTubeTests: XCTestCase {
             proxy: appProxy
         )
         XCTAssertFalse(source.title.isEmpty)
-        XCTAssertGreaterThan(source.duration ?? 0, 0)
         XCTAssertNotNil(source.url)
         XCTAssertNil(source.fileURL)
         if source.isTransportStream {

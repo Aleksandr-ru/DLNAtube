@@ -78,7 +78,10 @@ enum MediaExtractor {
         }
         let session = URLSession(configuration: ProxySettings.configuration(proxy))
         YouTube.networkSession = session
-        let video = YouTube(url: url, methods: [.local])
+        // YouTube changes its private player API frequently. Keep the fast local
+        // extractor first, then use YouTubeKit's maintained service when the
+        // bundled extractor can no longer understand a response.
+        let video = YouTube(url: url, methods: [.local, .remote])
         progress(L10n.text("Поиск доступных потоков YouTube…", "Searching for available YouTube streams…"))
         let streams = try await withThrowingTaskGroup(of: [YouTubeKit.Stream].self) { group in
             group.addTask { try await video.streams }

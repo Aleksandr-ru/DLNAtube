@@ -30,7 +30,9 @@ class RemoteYouTubeClient {
             websocketRequest.setValue(appIdentity.appID, forHTTPHeaderField: "X-AppID-v1")
         }
 
-        let task = URLSession.shared.webSocketTask(with: websocketRequest)
+        // Use the session configured by the host application so the remote
+        // fallback follows the same proxy settings as local extraction.
+        let task = YouTube.networkSession.webSocketTask(with: websocketRequest)
         task.resume()
         
         defer {
@@ -120,7 +122,7 @@ class RemoteYouTubeClient {
                 let request = serverMessage.content
                 
                 if !request.allowRedirects || request.applyCookiesOnRedirect {
-                    let configuration = URLSessionConfiguration.default
+                    let configuration = YouTube.networkSession.configuration
                     let delegate = ConfigurableURLSessionDelegate(allowsRedirect: request.allowRedirects, applyCookiesOnRedirect: request.applyCookiesOnRedirect, saveIntermediateResponses: request.saveIntermediateResponses)
                     let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
                     let (data, response) = try await session.data(for: request.urlRequest)
@@ -131,7 +133,7 @@ class RemoteYouTubeClient {
                     }
                     try await task.send(remoteResponse, maxChunkSize: request.maxMessageChunkSize, encoder: encoder)
                 } else {
-                    let (data, response) = try await URLSession.shared.data(for: request.urlRequest)
+                    let (data, response) = try await YouTube.networkSession.data(for: request.urlRequest)
                     try await task.send(RemoteURLResponse(id: request.id, data: data, response: response), maxChunkSize: request.maxMessageChunkSize, encoder: encoder)
                 }
             }

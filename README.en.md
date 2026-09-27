@@ -15,7 +15,7 @@ sh scripts/build-app.sh
 open dist/DLNAtube.app
 ```
 
-If the project does not contain a prebuilt FFmpeg library for the current architecture, the script builds it from `Vendor/FFmpeg/ffmpeg-8.1.3.tar.xz`. The first such build takes longer. Building the application automatically increments the third version component and writes the new values to `Resources/Info.plist`.
+The `Vendor/` directory is not stored in Git. YouTubeKit 0.4.9 is a Swift package dependency, which SwiftPM downloads during the build. `scripts/setup-vendor.sh` downloads the FFmpeg 8.1.3 source archive into `Vendor/FFmpeg`; `scripts/build-app.sh` runs setup automatically if the archive is missing. If the project does not contain a prebuilt FFmpeg library for the current architecture, the script builds it from the archive. The first such build takes longer. Building the application automatically increments the third version component and writes the new values to `Resources/Info.plist`.
 
 To run the tests:
 
@@ -47,9 +47,9 @@ Safari and WebKit are not used in the current implementation. The application ob
 
 ## Embedded libraries and licenses
 
-The YouTubeKit source is included in `Vendor/YouTubeKit-0.4.9` under the MIT license. The application uses local extraction only and does not call the library's remote service.
+YouTubeKit 0.4.9 is fetched directly as an exact Swift package version from its [upstream repository](https://github.com/alexeichhorn/YouTubeKit). The application uses local extraction only and does not call the library's remote service. `Vendor/` is excluded from Git. Secret scanning skips the old `Vendor/YouTubeKit-0.4.9` path where the library used to be vendored.
 
-Separate streams are combined by a locally built library based on [FFmpeg 8.1.3](https://ffmpeg.org/download.html). The build disables GPL components, command-line programs, decoding, and transcoding. `Vendor/FFmpeg` contains the source archive and LGPL 2.1 license texts; the build script is `scripts/build-media-library.sh`. The `.app` bundle includes the compiled library and license texts, but does not include the FFmpeg source archive or a standalone `ffmpeg` command.
+Separate streams are combined by a locally built library based on [FFmpeg 8.1.3](https://ffmpeg.org/download.html). The build disables GPL components, command-line programs, decoding, and transcoding. The setup script downloads the source archive into `Vendor/FFmpeg`; `scripts/build-media-library.sh` builds the library. License texts are kept in `Resources/ThirdPartyLicenses` and included in the `.app` bundle. The bundle does not include the FFmpeg source archive or a standalone `ffmpeg` command.
 
 ## Local network permission and signing
 

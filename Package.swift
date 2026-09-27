@@ -5,9 +5,9 @@ let package = Package(
     name: "DlnaTube",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "DLNAtube", targets: ["DLNAtube"])],
-    dependencies: [.package(path: "Vendor/YouTubeKit-0.4.9")],
+    dependencies: [.package(url: "https://github.com/alexeichhorn/YouTubeKit.git", exact: "0.4.9")],
     targets: [
-        .executableTarget(name: "DLNAtube", dependencies: [.product(name: "YouTubeKit", package: "YouTubeKit-0.4.9")], path: "Sources/DlnaTube"),
-        .testTarget(name: "DlnaTubeTests", dependencies: ["DLNAtube", .product(name: "YouTubeKit", package: "YouTubeKit-0.4.9")])
+        .executableTarget(name: "DLNAtube", dependencies: [.product(name: "YouTubeKit", package: "youtubekit")], path: "Sources/DlnaTube"),
+        .testTarget(name: "DlnaTubeTests", dependencies: ["DLNAtube", .product(name: "YouTubeKit", package: "youtubekit")])
     ]
 )

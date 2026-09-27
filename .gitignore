@@ -9,9 +9,9 @@ dist/
 *.dSYM/
 *.xcarchive/
 
-# FFmpeg build output; sources and license files under Vendor/FFmpeg stay tracked
+# Generated third-party dependencies
+/Vendor/
 /ffbuild/
-Vendor/FFmpeg/lib/libDlnaTubeMedia.dylib
 
 # Xcode user data and local build products
 DerivedData/

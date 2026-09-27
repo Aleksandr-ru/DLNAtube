@@ -2,6 +2,9 @@
 set -eu
 
 cd "$(dirname "$0")/.."
+if [ ! -f Vendor/FFmpeg/ffmpeg-8.1.3.tar.xz ]; then
+    scripts/setup-vendor.sh
+fi
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache"
 if ! lipo -archs Vendor/FFmpeg/lib/libDlnaTubeMedia.dylib 2>/dev/null | grep -qw "$(uname -m)"; then
     scripts/build-media-library.sh
@@ -36,9 +39,9 @@ cp Resources/Info.plist "$app_dir/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $app_version" "$app_dir/Contents/Info.plist"
 cp Resources/DlnaTube.icns "$app_dir/Contents/Resources/DlnaTube.icns"
 cp -R Resources/ru.lproj Resources/en.lproj "$app_dir/Contents/Resources/"
-cp Vendor/YouTubeKit-0.4.9/LICENSE "$app_dir/Contents/Resources/YouTubeKit-LICENSE.txt"
-cp Vendor/FFmpeg/LICENSE.md "$app_dir/Contents/Resources/FFmpeg-LICENSE.md"
-cp Vendor/FFmpeg/COPYING.LGPLv2.1 "$app_dir/Contents/Resources/FFmpeg-COPYING.LGPLv2.1"
+cp Resources/ThirdPartyLicenses/YouTubeKit-LICENSE.txt "$app_dir/Contents/Resources/YouTubeKit-LICENSE.txt"
+cp Resources/ThirdPartyLicenses/FFmpeg-LICENSE.md "$app_dir/Contents/Resources/FFmpeg-LICENSE.md"
+cp Resources/ThirdPartyLicenses/FFmpeg-COPYING.LGPLv2.1 "$app_dir/Contents/Resources/FFmpeg-COPYING.LGPLv2.1"
 mkdir -p "$app_dir/Contents/Resources/YouTubeKit_YouTubeKit.bundle"
 cp -R "$binary_dir/YouTubeKit_YouTubeKit.bundle/." "$app_dir/Contents/Resources/YouTubeKit_YouTubeKit.bundle/"
 current_year=$(date +%Y)

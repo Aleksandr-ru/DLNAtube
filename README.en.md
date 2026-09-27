@@ -15,11 +15,12 @@ sh scripts/build-app.sh
 open dist/DLNAtube.app
 ```
 
-The `Vendor/` directory is not stored in Git. YouTubeKit 0.4.9 is a Swift package dependency, which SwiftPM downloads during the build. `scripts/setup-vendor.sh` downloads the FFmpeg 8.1.3 source archive into `Vendor/FFmpeg`; `scripts/build-app.sh` runs setup automatically if the archive is missing. If the project does not contain a prebuilt FFmpeg library for the current architecture, the script builds it from the archive. The first such build takes longer. Building the application automatically increments the third version component and writes the new values to `Resources/Info.plist`.
+The `Vendor/` directory is not stored in Git. YouTubeKit 0.4.9 is a Swift package dependency. Before building, `scripts/prepare-youtubekit.sh` resolves the pinned version and applies a small patch for proxy support, video duration, seeking, and app resources. Package sources stay under `.build/`; the patch is stored in the repository. `scripts/setup-vendor.sh` downloads the FFmpeg 8.1.3 source archive into `Vendor/FFmpeg`; `scripts/build-app.sh` runs setup automatically if the archive is missing. If the project does not contain a prebuilt FFmpeg library for the current architecture, the script builds it from the archive. The first such build takes longer.
 
 To run the tests:
 
 ```sh
+sh scripts/prepare-youtubekit.sh
 swift test
 ```
 
@@ -47,7 +48,7 @@ Safari and WebKit are not used in the current implementation. The application ob
 
 ## Embedded libraries and licenses
 
-YouTubeKit 0.4.9 is fetched directly as an exact Swift package version from its [upstream repository](https://github.com/alexeichhorn/YouTubeKit). The application uses local extraction only and does not call the library's remote service. `Vendor/` is excluded from Git. Secret scanning skips the old `Vendor/YouTubeKit-0.4.9` path where the library used to be vendored.
+YouTubeKit 0.4.9 is fetched from its [upstream repository](https://github.com/alexeichhorn/YouTubeKit) as an exact Swift package version. The application uses local extraction only and does not call the library's remote service. `scripts/prepare-youtubekit.sh` runs the focused adaptation in `scripts/patch-youtubekit.py` to retain proxy settings, expose video duration, and support seeking and resource loading from the built `.app`. The package checkout and its adapted copy stay under ignored `.build/`; `Vendor/` is also excluded from Git.
 
 Separate streams are combined by a locally built library based on [FFmpeg 8.1.3](https://ffmpeg.org/download.html). The build disables GPL components, command-line programs, decoding, and transcoding. The setup script downloads the source archive into `Vendor/FFmpeg`; `scripts/build-media-library.sh` builds the library. License texts are kept in `Resources/ThirdPartyLicenses` and included in the `.app` bundle. The bundle does not include the FFmpeg source archive or a standalone `ffmpeg` command.
 

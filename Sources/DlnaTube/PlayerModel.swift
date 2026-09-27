@@ -44,6 +44,7 @@ final class PlayerModel: ObservableObject {
     @Published var loadingCapabilities = false
     @Published var videoURL = ""
     @Published private(set) var videoHistory: [VideoHistoryEntry]
+    @Published var selectedHistoryURL: String?
     @Published private(set) var desiredQuality: VideoQuality = .p720
     @Published var proxyURL = UserDefaults.standard.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
     @Published private(set) var language = AppLanguage.current
@@ -72,12 +73,17 @@ final class PlayerModel: ObservableObject {
     private var capabilityDeviceID = ""
     private var capabilityCache: [String: RendererCapabilities] = [:]
     private var lastPollingError: String?
-    private var qualityByDevice: [String: VideoQuality] = [:]
 
     init() {
         let defaults = UserDefaults.standard
         let oldPreferences = defaults.persistentDomain(forName: "app.dlnatube.DlnaTube") ?? [:]
-        for key in [ProxySettings.preferenceKey, AppLanguage.preferenceKey, "videoHistory", VideoQuality.preferencesByDeviceKey]
+        for key in [
+            ProxySettings.preferenceKey,
+            AppLanguage.preferenceKey,
+            "videoHistory",
+            VideoQuality.preferencesKey,
+            VideoQuality.legacyPreferencesByDeviceKey
+        ]
             where defaults.object(forKey: key) == nil {
             if let value = oldPreferences[key] { defaults.set(value, forKey: key) }
         }
@@ -88,12 +94,20 @@ final class PlayerModel: ObservableObject {
         proxyURL = defaults.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
         language = AppLanguage.current
         status = L10n.text("Готово", "Ready")
-        if let data = defaults.data(forKey: VideoQuality.preferencesByDeviceKey),
-           let stored = try? JSONDecoder().decode([String: Int].self, from: data) {
-            qualityByDevice = stored.reduce(into: [:]) { result, item in
-                if let quality = VideoQuality(rawValue: item.value) { result[item.key] = quality }
+        if let height = defaults.object(forKey: VideoQuality.preferencesKey) as? Int,
+           let quality = VideoQuality(rawValue: height) {
+            desiredQuality = quality
+        } else if let data = defaults.data(forKey: VideoQuality.legacyPreferencesByDeviceKey),
+                  let stored = try? JSONDecoder().decode([String: Int].self, from: data) {
+            let legacyHeights = Set(stored.values.filter { VideoQuality(rawValue: $0) != nil })
+            if legacyHeights.count == 1,
+               let height = legacyHeights.first,
+               let quality = VideoQuality(rawValue: height) {
+                desiredQuality = quality
+                defaults.set(quality.rawValue, forKey: VideoQuality.preferencesKey)
             }
         }
+        defaults.removeObject(forKey: VideoQuality.legacyPreferencesByDeviceKey)
     }
 
     func discover(startup: Bool = false) {
@@ -133,17 +147,14 @@ final class PlayerModel: ObservableObject {
             capabilities = nil
             capabilityMessage = nil
             loadingCapabilities = false
-            desiredQuality = .p720
             return
         }
         if loadingCapabilities && capabilityDeviceID == device.id { return }
         capabilityTask?.cancel()
         capabilityDeviceID = device.id
-        desiredQuality = qualityByDevice[device.id] ?? .p720
         capabilities = capabilityCache[device.id]
         capabilityMessage = nil
         guard capabilities == nil else {
-            applyRecommendedQuality()
             loadingCapabilities = false
             return
         }
@@ -154,7 +165,6 @@ final class PlayerModel: ObservableObject {
                 guard !Task.isCancelled, selectedDeviceID == device.id else { return }
                 capabilityCache[device.id] = value
                 capabilities = value
-                applyRecommendedQuality()
             } catch {
                 guard !Task.isCancelled, selectedDeviceID == device.id else { return }
                 capabilityMessage = error.localizedDescription
@@ -164,32 +174,16 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func selectVideoQuality(_ quality: VideoQuality) {
-        desiredQuality = quality
-        guard !selectedDeviceID.isEmpty else { return }
-        qualityByDevice[selectedDeviceID] = quality
-        let stored = qualityByDevice.mapValues(\.rawValue)
-        if let data = try? JSONEncoder().encode(stored) {
-            UserDefaults.standard.set(data, forKey: VideoQuality.preferencesByDeviceKey)
-        }
-    }
-
-    private func applyRecommendedQuality() {
-        if let saved = qualityByDevice[selectedDeviceID] {
-            desiredQuality = saved
-            return
-        }
-        desiredQuality = VideoQuality.recommended(maxHeight: capabilities?.maxVideoHeight)
-    }
-
     @discardableResult
-    func saveSettings(proxy: String, language newLanguage: AppLanguage) -> Bool {
+    func saveSettings(proxy: String, language newLanguage: AppLanguage, quality newQuality: VideoQuality) -> Bool {
         do {
             let normalized = try ProxySettings.normalized(proxy)
             UserDefaults.standard.set(normalized ?? "", forKey: ProxySettings.preferenceKey)
             UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.preferenceKey)
+            UserDefaults.standard.set(newQuality.rawValue, forKey: VideoQuality.preferencesKey)
             proxyURL = normalized ?? ""
             language = newLanguage
+            desiredQuality = newQuality
             errorMessage = nil
             status = L10n.text("Настройки сохранены", "Settings saved")
             return true
@@ -203,6 +197,10 @@ final class PlayerModel: ObservableObject {
         guard !busy, let device = devices.first(where: { $0.id == selectedDeviceID }) else { return }
         let requestedURL = videoURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requestedURL.isEmpty else { return }
+        videoURL = requestedURL
+        selectedHistoryURL = videoHistory.first(where: { $0.url == requestedURL })?.url
+        let deviceMaxHeight = capabilities?.maxVideoHeight ?? desiredQuality.rawValue
+        let maxVideoHeight = min(desiredQuality.rawValue, deviceMaxHeight)
         busy = true
         preparing = true
         errorMessage = nil
@@ -214,14 +212,15 @@ final class PlayerModel: ObservableObject {
                 let source = try await MediaExtractor.extract(
                     videoURL: requestedURL,
                     proxy: proxy,
-                    maxVideoHeight: desiredQuality.rawValue
+                    maxVideoHeight: maxVideoHeight
                 ) { [weak self] message in
                     Task { @MainActor [weak self] in
                         if self?.preparing == true { self?.status = message }
                     }
                 }
-                if source.isTransportStream { try MediaBridge.requireAvailable() }
                 try Task.checkCancellation()
+                recordVideoHistory(url: requestedURL, title: source.title)
+                if source.isTransportStream { try MediaBridge.requireAvailable() }
                 if server == nil { server = try MediaServer() }
                 guard let server else { return }
                 pollTask?.cancel()
@@ -236,7 +235,6 @@ final class PlayerModel: ObservableObject {
                 try Task.checkCancellation()
                 _ = try await DLNA.command("Play", device: device, arguments: [("Speed", "1")])
                 StreamingLog.dlna.info("Playback started: device=\(device.name, privacy: .public), transport=\(source.isTransportStream ? "mpeg-ts" : "mp4", privacy: .public)")
-                recordSuccessfulPlayback(url: requestedURL, title: source.title)
                 activeDevice = device
                 currentSource = source
                 currentProxy = proxy
@@ -446,11 +444,18 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    private func recordSuccessfulPlayback(url: String, title: String) {
+    func playHistoryEntry(_ entry: VideoHistoryEntry) {
+        videoURL = entry.url
+        selectedHistoryURL = entry.url
+        cast()
+    }
+
+    private func recordVideoHistory(url: String, title: String) {
         let entry = VideoHistoryEntry(url: url, title: title)
         videoHistory.removeAll { $0.url == url }
         videoHistory.insert(entry, at: 0)
         videoHistory = Array(videoHistory.prefix(100))
+        selectedHistoryURL = entry.url
         if let data = try? JSONEncoder().encode(videoHistory) {
             UserDefaults.standard.set(data, forKey: "videoHistory")
         }

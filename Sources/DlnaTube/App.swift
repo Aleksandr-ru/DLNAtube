@@ -9,9 +9,9 @@ struct DlnaTubeApp: App {
     var body: some Scene {
         WindowGroup("DLNAtube") {
             ContentView(model: model)
-                .frame(minWidth: 560, minHeight: 450)
+                .frame(minWidth: 760, minHeight: 520)
         }
-        .defaultSize(width: 600, height: 450)
+        .defaultSize(width: 900, height: 620)
         .windowResizability(.contentSize)
         .commands {
             DLNAtubeCommands(language: model.language)
@@ -73,131 +73,52 @@ struct ContentView: View {
     @State private var scrubTime: Double = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack {
-                if let iconURL = Bundle.main.url(forResource: "DlnaTube", withExtension: "icns"),
-                   let icon = NSImage(contentsOf: iconURL) {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 25, height: 25)
-                }
-                Text("DLNAtube")
-                    .font(.title2.weight(.semibold))
-                Spacer()
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(L10n.text("Устройство воспроизведения", "Playback device"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    Picker(L10n.text("Устройство воспроизведения", "Playback device"), selection: $model.selectedDeviceID) {
-                        Text(L10n.text("Выберите устройство", "Select a device")).tag("")
-                        ForEach(model.devices) { device in
-                            Text(device.name).tag(device.id)
+        NavigationSplitView {
+            VStack(spacing: 0) {
+                List(selection: selectedDeviceSelection) {
+                    Section {
+                        if model.devices.isEmpty {
+                            Label(
+                                model.discovering
+                                    ? L10n.text("Поиск устройств…", "Searching for devices…")
+                                    : L10n.text("Устройства не найдены", "No devices found"),
+                                systemImage: model.discovering ? "dot.radiowaves.left.and.right" : "tv"
+                            )
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                        } else {
+                            ForEach(model.devices) { device in
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(device.name)
+                                            .lineLimit(1)
+                                        Text(device.host)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                } icon: {
+                                    Image(systemName: "tv")
+                                }
+                                .tag(Optional(device.id))
+                            }
                         }
+                    } header: {
+                        Text(L10n.text("Устройства", "Devices"))
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        model.discover()
-                    } label: {
-                        Label(L10n.text("Найти устройства", "Find devices"), systemImage: "arrow.clockwise")
-                    }
-                    .disabled(model.discovering)
                 }
+                .listStyle(.sidebar)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
                 deviceCapabilitiesPanel
+                    .padding(10)
             }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(L10n.text("Ссылка на YouTube", "YouTube URL"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    VideoURLHistoryField(
-                        text: $model.videoURL,
-                        history: model.videoHistory,
-                        language: model.language,
-                        onSubmit: { model.cast() }
-                    )
-                    .frame(maxWidth: .infinity)
-                    Picker(L10n.text("Качество", "Quality"), selection: Binding(
-                        get: { model.desiredQuality },
-                        set: { model.selectVideoQuality($0) }
-                    )) {
-                        ForEach(VideoQuality.allCases) { quality in
-                            Text(quality.title).tag(quality)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 112)
-                    .help(L10n.text("Максимальное желаемое качество видео", "Maximum preferred video quality"))
-                    .disabled(model.selectedDeviceID.isEmpty)
-                    if model.preparing {
-                        Button(L10n.text("Отменить", "Cancel")) { model.cancelPreparation() }
-                    } else {
-                        Button(L10n.text("Воспроизвести", "Play")) { model.cast() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.busy || model.selectedDeviceID.isEmpty || model.videoURL.isEmpty)
-                    }
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text(model.title.isEmpty ? L10n.text("Нет воспроизведения", "Nothing playing") : model.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                HStack(spacing: 14) {
-                    Button { model.togglePlayback() } label: {
-                        Image(systemName: model.playing ? "pause.fill" : "play.fill")
-                            .frame(width: 20)
-                    }
-                    .disabled(!model.hasMedia || model.busy)
-                    Button { model.stop() } label: {
-                        Image(systemName: "stop.fill")
-                            .frame(width: 20)
-                    }
-                    .disabled(!model.hasMedia || model.busy)
-                    Slider(value: Binding(
-                        get: { scrubbing ? scrubTime : model.position },
-                        set: { scrubTime = $0; scrubbing = true }
-                    ), in: 0...max(model.duration, 1), onEditingChanged: { editing in
-                        if !editing && scrubbing {
-                            model.seek(to: scrubTime)
-                            scrubbing = false
-                        }
-                    })
-                    .disabled(!model.hasMedia || !model.canSeek || model.busy || model.duration <= 0)
-                    Text("\(formatTime(scrubbing ? scrubTime : model.position)) / \(formatTime(model.duration))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 92, alignment: .trailing)
-                }
-                .buttonStyle(.bordered)
-            }
-            HStack {
-                if model.busy || model.discovering { ProgressView().controlSize(.small) }
-                Text(model.status)
-                    .font(.caption)
-                    .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.red)
-                    .lineLimit(2)
-                Spacer()
-                Button {
-                    openWindow(id: "settings")
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .buttonStyle(.plain)
-                .help(L10n.text("Настройки", "Settings"))
-            }
-            .frame(height: 32)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 280)
+        } detail: {
+            playerDetail
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 14)
+        .navigationSplitViewStyle(.balanced)
         .onAppear {
             DlnaTubeAppDelegate.playerModel = model
             model.discover(startup: true)
@@ -206,6 +127,139 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if model.devices.isEmpty { model.discover(startup: true) }
         }
+    }
+
+    private var selectedDeviceSelection: Binding<String?> {
+        Binding(
+            get: { model.selectedDeviceID.isEmpty ? nil : model.selectedDeviceID },
+            set: { model.selectedDeviceID = $0 ?? "" }
+        )
+    }
+
+    private var playerDetail: some View {
+        VStack(spacing: 0) {
+            VideoHistoryList(
+                text: $model.videoURL,
+                selectedVideoURL: $model.selectedHistoryURL,
+                history: model.videoHistory,
+                language: model.language,
+                onSelect: { model.playHistoryEntry($0) }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(alignment: .leading, spacing: 20) {
+                GroupBox {
+                    HStack(spacing: 10) {
+                        VideoURLHistoryField(
+                            text: $model.videoURL,
+                            onSubmit: { model.cast() }
+                        )
+                        .frame(maxWidth: .infinity)
+
+                        if model.preparing {
+                            Button(L10n.text("Отменить", "Cancel")) { model.cancelPreparation() }
+                        } else {
+                            Button(L10n.text("Воспроизвести", "Play")) { model.cast() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.busy || model.selectedDeviceID.isEmpty || model.videoURL.isEmpty)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label(L10n.text("YouTube", "YouTube"), systemImage: "play.rectangle")
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(model.title.isEmpty ? L10n.text("Нет воспроизведения", "Nothing playing") : model.title)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        HStack(spacing: 12) {
+                            Button { model.togglePlayback() } label: {
+                                Image(systemName: model.playing ? "pause.fill" : "play.fill")
+                                    .frame(width: 20)
+                            }
+                            .help(model.playing ? L10n.text("Пауза", "Pause") : L10n.text("Воспроизвести", "Play"))
+                            .disabled(!model.hasMedia || model.busy)
+
+                            Button { model.stop() } label: {
+                                Image(systemName: "stop.fill")
+                                    .frame(width: 20)
+                            }
+                            .help(L10n.text("Остановить", "Stop"))
+                            .disabled(!model.hasMedia || model.busy)
+
+                            Slider(value: Binding(
+                                get: { scrubbing ? scrubTime : model.position },
+                                set: { scrubTime = $0; scrubbing = true }
+                            ), in: 0...max(model.duration, 1), onEditingChanged: { editing in
+                                if !editing && scrubbing {
+                                    model.seek(to: scrubTime)
+                                    scrubbing = false
+                                }
+                            })
+                            .disabled(!model.hasMedia || !model.canSeek || model.busy || model.duration <= 0)
+
+                            Text("\(formatTime(scrubbing ? scrubTime : model.position)) / \(formatTime(model.duration))")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 92, alignment: .trailing)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label(L10n.text("Плеер", "Player"), systemImage: "speaker.wave.2")
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .padding(.bottom, 20)
+            .frame(maxWidth: 820)
+            .frame(maxWidth: .infinity)
+
+            Divider()
+            HStack(spacing: 9) {
+                if model.busy || model.discovering {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: model.errorMessage == nil ? "checkmark.circle" : "exclamationmark.circle")
+                        .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.red)
+                }
+                Text(model.status)
+                    .font(.caption)
+                    .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.red)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(.bar)
+        }
+        .navigationTitle("DLNAtube")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { model.discover() } label: {
+                    Label(L10n.text("Найти устройства", "Find devices"), systemImage: "arrow.clockwise")
+                        .labelStyle(.titleAndIcon)
+                }
+                .help(L10n.text("Найти устройства", "Find devices"))
+                .disabled(model.discovering)
+            }
+            ToolbarItem {
+                Button { openWindow(id: "settings") } label: {
+                    Label(L10n.text("Настройки", "Settings"), systemImage: "gearshape")
+                }
+                .help(L10n.text("Настройки", "Settings"))
+            }
+        }
+    }
+
+    private var selectedDeviceName: String? {
+        model.devices.first(where: { $0.id == model.selectedDeviceID })?.name
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -223,26 +277,33 @@ struct ContentView: View {
         } ?? capabilityPlaceholder
         let resolution = model.capabilities?.resolution ?? capabilityPlaceholder
 
-        return VStack(alignment: .leading, spacing: 5) {
-            Text(L10n.text("Поддержка DLNA", "DLNA support"))
+        return VStack(alignment: .leading, spacing: 8) {
+            Label(L10n.text("Поддержка DLNA", "DLNA support"), systemImage: "info.circle")
                 .font(.caption.weight(.semibold))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.text("Видео: \(videoFormats)", "Video: \(videoFormats)"))
+            VStack(alignment: .leading, spacing: 6) {
+                capabilityRow(L10n.text("Видео", "Video"), value: videoFormats)
                     .help(model.capabilities?.videoFormats.joined(separator: ", ") ?? capabilityErrorHelp)
-                Text(L10n.text("Звук: \(audioFormats)", "Audio: \(audioFormats)"))
+                capabilityRow(L10n.text("Звук", "Audio"), value: audioFormats)
                     .help(model.capabilities?.audioFormats.joined(separator: ", ") ?? capabilityErrorHelp)
-                Text(L10n.text("Разрешение: \(resolution)", "Resolution: \(resolution)"))
+                capabilityRow(L10n.text("Разрешение", "Resolution"), value: resolution)
             }
-            .font(.caption)
-            .lineLimit(1)
-            .frame(height: 48, alignment: .topLeading)
-            .clipped()
         }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .frame(height: 89, alignment: .topLeading)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func capabilityRow(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .font(.caption2)
+            Text(value)
+                .font(.caption)
+                .lineLimit(2)
+                .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var capabilityPlaceholder: String {
@@ -258,86 +319,118 @@ struct ContentView: View {
 
 private struct VideoURLHistoryField: View {
     @Binding var text: String
-    let history: [VideoHistoryEntry]
-    let language: AppLanguage
     let onSubmit: () -> Void
-
-    @State private var showingChoices = false
-    @State private var skipNextSearchUpdate = false
-    @FocusState private var fieldFocused: Bool
-
-    private var matches: [VideoHistoryEntry] {
-        let groups = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        guard !groups.isEmpty else { return Array(history.prefix(10)) }
-        return history.filter { entry in
-            let searchableText = "\(entry.url) \(entry.title)"
-            return groups.contains { searchableText.localizedStandardContains($0) }
-        }
-    }
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         TextField("https://www.youtube.com/watch?v=…", text: $text)
             .textFieldStyle(.roundedBorder)
-            .focused($fieldFocused)
-            .onChange(of: fieldFocused) { focused in
-                if focused { showingChoices = true }
-            }
-            .onChange(of: text) { _ in
-                if skipNextSearchUpdate {
-                    skipNextSearchUpdate = false
-                    return
+            .focused($isFocused)
+            .onSubmit(onSubmit)
+            .onChange(of: isFocused) { focused in
+                guard focused else { return }
+                DispatchQueue.main.async {
+                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
                 }
-                showingChoices = true
-            }
-            .onSubmit {
-                showingChoices = false
-                onSubmit()
-            }
-            .popover(isPresented: $showingChoices, arrowEdge: .bottom) {
-                choices
             }
     }
+}
 
-    private var choices: some View {
-        VStack(alignment: .leading, spacing: 0) {
+private struct VideoHistoryList: View {
+    @Binding var text: String
+    @Binding var selectedVideoURL: String?
+    let history: [VideoHistoryEntry]
+    let language: AppLanguage
+    let onSelect: (VideoHistoryEntry) -> Void
+
+    private var isURLInput: Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        let candidate = value.contains("://") ? value : "https://\(value)"
+        guard let components = URLComponents(string: candidate),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host else { return false }
+        return host.contains(".")
+    }
+
+    private var matches: [VideoHistoryEntry] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return Array(history.prefix(10).reversed()) }
+        if isURLInput { return Array(history.reversed()) }
+        let groups = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !groups.isEmpty else { return Array(history.prefix(10).reversed()) }
+        return Array(history.filter { entry in
+            let searchableText = "\(entry.url) \(entry.title)"
+            return groups.contains { searchableText.localizedStandardContains($0) }
+        }.reversed())
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
             if history.isEmpty {
                 Text(L10n.text("История воспроизведения пуста", "Playback history is empty", language: language))
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else if matches.isEmpty {
                 Text(L10n.text("Совпадений не найдено", "No matches found", language: language))
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(matches) { entry in
-                            Button {
-                                if text == entry.url {
-                                    skipNextSearchUpdate = false
-                                } else {
-                                    skipNextSearchUpdate = true
-                                    text = entry.url
+                let listHeight = min(geometry.size.height, CGFloat(matches.count) * 36)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ScrollViewReader { proxy in
+                        List(selection: $selectedVideoURL) {
+                            ForEach(Array(matches.enumerated()), id: \.element.id) { index, entry in
+                                let isSelected = selectedVideoURL == entry.id
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.title)
+                                        .font(.system(size: 13))
+                                        .lineLimit(1)
+                                        .foregroundStyle(isSelected ? Color.white : .primary)
+                                    Text(entry.url)
+                                        .font(.caption)
+                                        .foregroundStyle(isSelected ? Color.white.opacity(0.8) : .secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
-                                showingChoices = false
-                            } label: {
-                                Text(entry.title)
-                                    .font(.system(size: 13))
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .contentShape(Rectangle())
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 2)
+                                .frame(height: 36)
+                                .contentShape(Rectangle())
+                                .tag(entry.id)
+                                .onTapGesture { onSelect(entry) }
+                                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+                                .listRowBackground(
+                                    isSelected
+                                        ? Color(nsColor: .selectedContentBackgroundColor)
+                                        : Color(nsColor: NSColor.alternatingContentBackgroundColors[index.isMultiple(of: 2) ? 0 : 1])
+                                )
                             }
-                            .buttonStyle(.plain)
-                            Divider()
                         }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: listHeight)
+                        .onAppear { scrollToSelectionOrLatest(using: proxy) }
+                        .onChange(of: text) { _ in scrollToSelectionOrLatest(using: proxy) }
+                        .onChange(of: selectedVideoURL) { _ in scrollToSelectionOrLatest(using: proxy) }
+                        .onChange(of: matches.last?.id) { _ in scrollToSelectionOrLatest(using: proxy) }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(width: 480, height: max(52, min(280, CGFloat(matches.count) * 54)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func scrollToSelectionOrLatest(using proxy: ScrollViewProxy) {
+        let targetID = matches.first(where: { $0.id == selectedVideoURL })?.id ?? matches.last?.id
+        guard let targetID else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(targetID, anchor: selectedVideoURL == targetID ? .center : .bottom)
+        }
     }
 }
 
@@ -345,12 +438,14 @@ struct SettingsView: View {
     @ObservedObject var model: PlayerModel
     @State private var proxyDraft: String
     @State private var languageDraft: AppLanguage
+    @State private var qualityDraft: VideoQuality
     @State private var saveError: String?
 
     init(model: PlayerModel) {
         self.model = model
         _proxyDraft = State(initialValue: model.proxyURL)
         _languageDraft = State(initialValue: model.language)
+        _qualityDraft = State(initialValue: model.desiredQuality)
     }
 
     var body: some View {
@@ -362,6 +457,22 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            Divider()
+            Text(L10n.text("Видео", "Video")).font(.headline)
+            Picker(L10n.text("Качество видео", "Video quality"), selection: $qualityDraft) {
+                ForEach(VideoQuality.allCases) { quality in
+                    Text(quality.settingsTitle).tag(quality)
+                }
+            }
+            .pickerStyle(.menu)
+            .help(L10n.text("Максимальное желаемое качество видео", "Maximum preferred video quality"))
+            Text(L10n.text(
+                "Выбранное качество — верхний предел. Такой поток должен быть доступен у ролика и поддерживаться DLNA-устройством.",
+                "The selected quality is a maximum. The video must provide a matching stream and the DLNA device must support it.",
+                language: model.language
+            ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Divider()
             Text(L10n.text("Сеть", "Network")).font(.headline)
             Text(L10n.text(
@@ -393,12 +504,13 @@ struct SettingsView: View {
         .onAppear {
             proxyDraft = model.proxyURL
             languageDraft = model.language
+            qualityDraft = model.desiredQuality
             saveError = nil
         }
     }
 
     private func save() {
-        if model.saveSettings(proxy: proxyDraft, language: languageDraft) {
+        if model.saveSettings(proxy: proxyDraft, language: languageDraft, quality: qualityDraft) {
             NSApp.keyWindow?.close()
         } else {
             saveError = model.errorMessage

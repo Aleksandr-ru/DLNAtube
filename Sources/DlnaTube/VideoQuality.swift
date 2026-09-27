@@ -10,11 +10,29 @@ enum VideoQuality: Int, CaseIterable, Identifiable {
     case p2160 = 2160
     case p4320 = 4320
 
-    static let preferencesByDeviceKey = "desiredVideoHeightByDevice"
+    static let preferencesKey = "desiredVideoHeight"
+    static let legacyPreferencesByDeviceKey = "desiredVideoHeightByDevice"
 
     var id: Int { rawValue }
     var title: String {
         Self.title(for: rawValue)
+    }
+
+    var dimensions: String {
+        switch self {
+        case .p240: return "426 × 240 px"
+        case .p360: return "640 × 360 px"
+        case .p480: return "854 × 480 px"
+        case .p720: return "1280 × 720 px"
+        case .p1080: return "1920 × 1080 px"
+        case .p1440: return "2560 × 1440 px"
+        case .p2160: return "3840 × 2160 px"
+        case .p4320: return "7680 × 4320 px"
+        }
+    }
+
+    var settingsTitle: String {
+        "\(title) · \(dimensions)"
     }
 
     static func title(for height: Int) -> String {
@@ -30,4 +48,5 @@ enum VideoQuality: Int, CaseIterable, Identifiable {
         guard let maxHeight else { return .p720 }
         return allCases.last(where: { $0.rawValue <= maxHeight }) ?? allCases[0]
     }
+
 }

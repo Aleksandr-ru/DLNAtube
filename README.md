@@ -1,3 +1,5 @@
+![DLNAtube](./Resources/DlnaTube-128.png?raw=true)
+
 # DLNAtube
 
 Минималистичное приложение для macOS, которое воспроизводит видео с YouTube на телевизорах и других устройствах DLNA/UPnP MediaRenderer.

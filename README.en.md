@@ -1,3 +1,5 @@
+![DLNAtube](./Resources/DlnaTube-128.png?raw=true)
+
 # DLNAtube
 
 A minimalist macOS application that plays YouTube videos on TVs and other DLNA/UPnP MediaRenderer devices.

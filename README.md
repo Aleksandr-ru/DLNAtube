@@ -4,7 +4,7 @@
 
 **English:** The application supports an English interface. See the [English README](README.en.md).
 
-![DLNAtube screenshot](./Screenshots/01.png?raw=true)
+![DLNAtube screenshot](./Screenshots/03.png?raw=true)
 
 ## Сборка и запуск
 

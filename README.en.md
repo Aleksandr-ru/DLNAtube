@@ -4,7 +4,7 @@ A minimalist macOS application that plays YouTube videos on TVs and other DLNA/U
 
 **Русский:** Приложение поддерживает русский интерфейс. См. [README на русском языке](README.md).
 
-![DLNAtube screenshot](./Screenshots/02.png?raw=true)
+![DLNAtube screenshot](./Screenshots/03.png?raw=true)
 
 ## Building and running
 

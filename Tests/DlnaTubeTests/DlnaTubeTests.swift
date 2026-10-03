@@ -101,6 +101,48 @@ final class DlnaTubeTests: XCTestCase {
         XCTAssertFalse(paused.resolvedPlaying(previous: true))
     }
 
+    func testSleepPreventionFollowsSettingAndPlaybackWithoutDuplicateActivities() {
+        var started = 0
+        var ended = 0
+        let token = NSObject()
+        let prevention = PlaybackSleepPrevention(
+            beginActivity: { started += 1; return token },
+            endActivity: {
+                XCTAssertTrue(($0 as AnyObject) === token)
+                ended += 1
+            }
+        )
+
+        prevention.update(enabled: false, playing: true)
+        prevention.update(enabled: true, playing: false)
+        XCTAssertEqual(started, 0)
+
+        prevention.update(enabled: true, playing: true)
+        prevention.update(enabled: true, playing: true)
+        XCTAssertEqual(started, 1)
+        XCTAssertEqual(ended, 0)
+
+        prevention.update(enabled: true, playing: false)
+        prevention.update(enabled: true, playing: false)
+        XCTAssertEqual(ended, 1)
+
+        prevention.update(enabled: true, playing: true)
+        XCTAssertEqual(started, 2)
+        prevention.update(enabled: false, playing: true)
+        XCTAssertEqual(ended, 2)
+    }
+
+    func testSleepPreventionReleasesActivityWhenDestroyed() {
+        var ended = 0
+        var prevention: PlaybackSleepPrevention? = PlaybackSleepPrevention(
+            beginActivity: { NSObject() },
+            endActivity: { _ in ended += 1 }
+        )
+        prevention?.update(enabled: true, playing: true)
+        prevention = nil
+        XCTAssertEqual(ended, 1)
+    }
+
     func testLocalMediaRange() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("DlnaTube-test-\(UUID().uuidString).mp4")
         try Data("abcdefghij".utf8).write(to: file)

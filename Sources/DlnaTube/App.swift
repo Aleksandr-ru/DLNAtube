@@ -439,6 +439,7 @@ struct SettingsView: View {
     @State private var proxyDraft: String
     @State private var languageDraft: AppLanguage
     @State private var qualityDraft: VideoQuality
+    @State private var preventSleepDraft: Bool
     @State private var saveError: String?
 
     init(model: PlayerModel) {
@@ -446,6 +447,7 @@ struct SettingsView: View {
         _proxyDraft = State(initialValue: model.proxyURL)
         _languageDraft = State(initialValue: model.language)
         _qualityDraft = State(initialValue: model.desiredQuality)
+        _preventSleepDraft = State(initialValue: model.preventSleepDuringPlayback)
     }
 
     var body: some View {
@@ -470,6 +472,19 @@ struct SettingsView: View {
                 "Выбранное качество — верхний предел. Такой поток должен быть доступен у ролика и поддерживаться DLNA-устройством.",
                 "The selected quality is a maximum. The video must provide a matching stream and the DLNA device must support it.",
                 language: model.language
+            ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+            Text(L10n.text("Воспроизведение", "Playback")).font(.headline)
+            Toggle(L10n.text(
+                "Не давать Mac засыпать во время воспроизведения",
+                "Prevent Mac from sleeping during playback"
+            ), isOn: $preventSleepDraft)
+            .toggleStyle(.checkbox)
+            Text(L10n.text(
+                "На паузе и после остановки сон снова разрешён. Экран может гаснуть.",
+                "Sleep is allowed when paused or stopped. The display can still turn off."
             ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -505,12 +520,14 @@ struct SettingsView: View {
             proxyDraft = model.proxyURL
             languageDraft = model.language
             qualityDraft = model.desiredQuality
+            preventSleepDraft = model.preventSleepDuringPlayback
             saveError = nil
         }
     }
 
     private func save() {
-        if model.saveSettings(proxy: proxyDraft, language: languageDraft, quality: qualityDraft) {
+        if model.saveSettings(proxy: proxyDraft, language: languageDraft, quality: qualityDraft,
+                              preventSleep: preventSleepDraft) {
             NSApp.keyWindow?.close()
         } else {
             saveError = model.errorMessage

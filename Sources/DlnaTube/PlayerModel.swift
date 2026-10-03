@@ -46,6 +46,9 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var videoHistory: [VideoHistoryEntry]
     @Published var selectedHistoryURL: String?
     @Published private(set) var desiredQuality: VideoQuality = .p720
+    @Published private(set) var preventSleepDuringPlayback = true {
+        didSet { updateSleepPrevention() }
+    }
     @Published var proxyURL = UserDefaults.standard.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
     @Published private(set) var language = AppLanguage.current
     @Published var title = ""
@@ -54,7 +57,9 @@ final class PlayerModel: ObservableObject {
     @Published var discovering = false
     @Published var busy = false
     @Published var preparing = false
-    @Published var playing = false
+    @Published var playing = false {
+        didSet { updateSleepPrevention() }
+    }
     @Published var position: Double = 0
     @Published var duration: Double = 0
     @Published var canSeek = false
@@ -73,6 +78,8 @@ final class PlayerModel: ObservableObject {
     private var capabilityDeviceID = ""
     private var capabilityCache: [String: RendererCapabilities] = [:]
     private var lastPollingError: String?
+    private let sleepPrevention = PlaybackSleepPrevention()
+    private var exiting = false
 
     init() {
         let defaults = UserDefaults.standard
@@ -82,17 +89,20 @@ final class PlayerModel: ObservableObject {
             AppLanguage.preferenceKey,
             "videoHistory",
             VideoQuality.preferencesKey,
+            PlaybackSleepPrevention.preferenceKey,
             VideoQuality.legacyPreferencesByDeviceKey
         ]
             where defaults.object(forKey: key) == nil {
             if let value = oldPreferences[key] { defaults.set(value, forKey: key) }
         }
+        defaults.register(defaults: [PlaybackSleepPrevention.preferenceKey: true])
         let stored = defaults.data(forKey: "videoHistory")
         let entries = stored.flatMap { try? JSONDecoder().decode([VideoHistoryEntry].self, from: $0) } ?? []
         var seen = Set<String>()
         videoHistory = entries.filter { !$0.url.isEmpty && seen.insert($0.url).inserted }.prefix(100).map { $0 }
         proxyURL = defaults.string(forKey: ProxySettings.preferenceKey) ?? ProxySettings.defaultURL
         language = AppLanguage.current
+        preventSleepDuringPlayback = defaults.bool(forKey: PlaybackSleepPrevention.preferenceKey)
         status = L10n.text("Готово", "Ready")
         if let height = defaults.object(forKey: VideoQuality.preferencesKey) as? Int,
            let quality = VideoQuality(rawValue: height) {
@@ -175,15 +185,18 @@ final class PlayerModel: ObservableObject {
     }
 
     @discardableResult
-    func saveSettings(proxy: String, language newLanguage: AppLanguage, quality newQuality: VideoQuality) -> Bool {
+    func saveSettings(proxy: String, language newLanguage: AppLanguage, quality newQuality: VideoQuality,
+                      preventSleep: Bool) -> Bool {
         do {
             let normalized = try ProxySettings.normalized(proxy)
             UserDefaults.standard.set(normalized ?? "", forKey: ProxySettings.preferenceKey)
             UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.preferenceKey)
             UserDefaults.standard.set(newQuality.rawValue, forKey: VideoQuality.preferencesKey)
+            UserDefaults.standard.set(preventSleep, forKey: PlaybackSleepPrevention.preferenceKey)
             proxyURL = normalized ?? ""
             language = newLanguage
             desiredQuality = newQuality
+            preventSleepDuringPlayback = preventSleep
             errorMessage = nil
             status = L10n.text("Настройки сохранены", "Settings saved")
             return true
@@ -261,6 +274,8 @@ final class PlayerModel: ObservableObject {
     }
 
     func stopBeforeApplicationExit() async {
+        exiting = true
+        updateSleepPrevention()
         pollTask?.cancel()
         capabilityTask?.cancel()
 
@@ -477,6 +492,10 @@ final class PlayerModel: ObservableObject {
         position = 0
         playbackTimeline.reset(position: 0, playing: false, uptime: uptime)
         status = L10n.text("Остановлено", "Stopped")
+    }
+
+    private func updateSleepPrevention() {
+        sleepPrevention.update(enabled: preventSleepDuringPlayback && !exiting, playing: playing)
     }
 
     private func show(_ error: Error) {

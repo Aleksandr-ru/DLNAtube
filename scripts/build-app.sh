@@ -51,6 +51,7 @@ cp Resources/ThirdPartyLicenses/YouTubeKit-LICENSE.txt "$app_dir/Contents/Resour
 cp Resources/ThirdPartyLicenses/FFmpeg-LICENSE.md "$app_dir/Contents/Resources/FFmpeg-LICENSE.md"
 cp Resources/ThirdPartyLicenses/FFmpeg-COPYING.LGPLv2.1 "$app_dir/Contents/Resources/FFmpeg-COPYING.LGPLv2.1"
 mkdir -p "$app_dir/Contents/Resources/YouTubeKit_YouTubeKit.bundle"
+chmod -R u+w "$app_dir/Contents/Resources/YouTubeKit_YouTubeKit.bundle"
 cp -R "$binary_dir/YouTubeKit_YouTubeKit.bundle/." "$app_dir/Contents/Resources/YouTubeKit_YouTubeKit.bundle/"
 current_year=$(date +%Y)
 /usr/libexec/PlistBuddy -c "Add :NSHumanReadableCopyright string Copyright © $current_year Aleksandr.ru." "$app_dir/Contents/Info.plist"

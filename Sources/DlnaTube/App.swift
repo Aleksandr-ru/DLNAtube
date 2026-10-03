@@ -400,6 +400,7 @@ private struct VideoHistoryList: View {
                                 .frame(height: 36)
                                 .contentShape(Rectangle())
                                 .tag(entry.id)
+                                .id(entry.id)
                                 .onTapGesture { onSelect(entry) }
                                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
                                 .listRowBackground(
@@ -416,7 +417,8 @@ private struct VideoHistoryList: View {
                         .onAppear { scrollToSelectionOrLatest(using: proxy) }
                         .onChange(of: text) { _ in scrollToSelectionOrLatest(using: proxy) }
                         .onChange(of: selectedVideoURL) { _ in scrollToSelectionOrLatest(using: proxy) }
-                        .onChange(of: matches.last?.id) { _ in scrollToSelectionOrLatest(using: proxy) }
+                        .onChange(of: matches.map(\.id)) { _ in scrollToSelectionOrLatest(using: proxy) }
+                        .onChange(of: listHeight) { _ in scrollToSelectionOrLatest(using: proxy) }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
